@@ -15,7 +15,7 @@ const FIELD_GROUPS = [
 const FIELD_DEFS = [
   { key: 'last_name', group: 'identity', label: 'Last name · Nume', syn: ['nume de familie', 'numele de familie', 'last name', 'surname', 'family name', 'lastname', 'nom'] },
   { key: 'first_name', group: 'identity', label: 'First name · Prenume', syn: ['prenume', 'prenumele', 'first name', 'given name', 'given names', 'firstname', 'forename', 'prenom'] },
-  { key: 'full_name', group: 'identity', label: 'Full name · Nume și prenume', hint: 'empty = first + last name', syn: ['nume si prenume', 'numele si prenumele', 'nume prenume', 'numele complet', 'nume complet', 'full name', 'name', 'name and surname', 'your name', 'applicant name', 'subsemnatul', 'subsemnata', 'subsemnatii', 'undersigned', 'titular', 'titularul', 'solicitant', 'solicitantul', 'eu', 'i', 'elevul', 'eleva', 'studentul', 'studenta', 'candidatul', 'candidata'] },
+  { key: 'full_name', group: 'identity', label: 'Full name · Nume și prenume', hint: 'empty = first + last name', syn: ['nume si prenume', 'numele si prenumele', 'nume de familie si prenume', 'numele de familie si prenumele', 'numele si prenumele complet', 'nume prenume', 'numele complet', 'nume complet', 'full name', 'name', 'name and surname', 'your name', 'applicant name', 'subsemnatul', 'subsemnata', 'subsemnatii', 'undersigned', 'titular', 'titularul', 'solicitant', 'solicitantul', 'eu', 'i the undersigned', 'elevul', 'eleva', 'studentul', 'studenta', 'candidatul', 'candidata'] },
   { key: 'cnp', group: 'identity', label: 'CNP / personal number', syn: ['cnp', 'c n p', 'cod numeric personal', 'codul numeric personal', 'personal numeric code', 'personal identification number', 'national id number', 'pin'] },
   { key: 'birth_date', group: 'identity', label: 'Date of birth · Data nașterii', syn: ['data nasterii', 'data de nastere', 'nascut la data de', 'nascuta la data de', 'nascut la', 'nascuta la', 'date of birth', 'birth date', 'birthdate', 'dob', 'born on'] },
   { key: 'birth_place', group: 'identity', label: 'Place of birth · Locul nașterii', syn: ['locul nasterii', 'loc nastere', 'locul de nastere', 'nascut in', 'nascuta in', 'place of birth', 'birthplace', 'born in'] },
@@ -59,6 +59,7 @@ const FIELD_DEFS = [
 // Not stored: filled automatically
 const SPECIAL_FIELDS = [
   { key: 'today', label: "Today's date", syn: ['data completarii', 'data semnarii', 'today', 'today s date'] },
+  { key: 'birth_place_date', label: 'Place and date of birth', syn: ['locul si data nasterii', 'data si locul nasterii', 'locul si data de nastere', 'data si locul de nastere', 'place and date of birth', 'date and place of birth'] },
   { key: 'age', label: 'Age (from birth date)', syn: ['varsta', 'varsta ani', 'in varsta de', 'age', 'years old', 'ani impliniti'] },
   { key: 'birth_day', label: 'Birth day (dd)', syn: ['ziua nasterii'] },
   { key: 'birth_month', label: 'Birth month (mm)', syn: ['luna nasterii'] },
@@ -99,6 +100,8 @@ const AMBIG_CONTEXT = {
   ],
 };
 
+const OTHER_PERSON = / (parintilor|parintelui|tatalui|mamei|copilului|copiilor|copil|minorului|minorilor|sotului|sotiei|sotul|sotia|reprezentantului|reprezentant|reprezentata prin|reprezentat prin|imputernicitului|imputernicit|mandatarului|tutorelui|decedatului|defunctului|requester s|requester|spouse s|spouse|child s|children|parent s|parents|guardian s|guardian|agent s|employer s|beneficiarului) /;
+
 // Build the matcher list for a vault (defaults + your custom fields)
 function compileFields(vault) {
   const list = [...FIELD_DEFS, ...SPECIAL_FIELDS, ...AMBIGUOUS].map((f) => ({ key: f.key, synN: f.syn.map(norm) }));
@@ -127,15 +130,26 @@ function classify(label, compiled, opts = {}) {
       if (idx < 0) continue;
       const tail = L.length - (idx + s.length + 2);
       if (tail > maxTail) continue;
+      // "Label:" lines: the field word must open the label ("Data:", not "poate fi dată:")
+      if (opts.maxLead != null && L.slice(0, idx).trim().split(' ').filter(Boolean).length > opts.maxLead) continue;
       const score = s.length * 2 - tail * 3;
       if (!best || score > best.score) best = { key: f.key, syn: s, score, tail };
     }
   }
   classify.lastGuess = false;
+  if (best) {
+    const after = L.slice(L.lastIndexOf(' ' + best.syn + ' ') + best.syn.length + 1) + ' ';
+    // "prenumele părinţilor", "Requester's name": asks about someone else
+    const at = L.lastIndexOf(' ' + best.syn + ' ');
+    const before = ' ' + L.slice(Math.max(0, at - 25), at) + ' ';
+    if ((OTHER_PERSON.test(after) || OTHER_PERSON.test(before)) && !/^(father_name|mother_name)$/.test(best.key)) return null;
+    // in Romanian "date" means data ("următoarele date"); as an English label it comes first ("Date:", "Date signed")
+    if (best.syn === 'date' && L.trim().split(' ').indexOf('date') > 1) return null;
+  }
   if (!best) {
     // nothing matched exactly: try similarity (typos, scan misreads, other languages)
     if (opts.fuzzy === false || typeof fuzzyClassify !== 'function') return null;
-    const g = fuzzyClassify(label, compiled, opts.fuzzyMin ?? 0.66);
+    const g = fuzzyClassify(label, compiled, opts.fuzzyMin ?? 0.7);
     if (!g) return null;
     classify.lastGuess = true;
     return g.key;
@@ -160,7 +174,7 @@ function classify(label, compiled, opts = {}) {
     }
   }
   if (pick) return pick;
-  return { '@date': 'today', '@zi': 'today_day', '@luna': 'today_month', '@an': 'today_year' }[best.key] || null;
+  return best.key === '@date' ? 'today' : null;
 }
 
 function fieldLabel(key, vault) {
@@ -213,6 +227,7 @@ function computeValues(vault) {
     if (a) v.address = a;
   }
   v.today = formatDate(new Date(), vault?.settings?.dateFormat);
+  if (v.birth_place || v.birth_date) v.birth_place_date = [v.birth_place, v.birth_date].filter(Boolean).join(', ');
   if (vault?.signature) v.signature = '✍︎ (your signature)';
   for (const k of Object.keys(v)) if (!v[k]) delete v[k];
   return v;

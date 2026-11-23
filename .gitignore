@@ -3,3 +3,4 @@ tests/out/
 .DS_Store
 autofill-smart.js
 smart/download/
+tests/real/

@@ -216,6 +216,11 @@ function fieldValue(b, text) {
     const o = bestOption(b.options || [], text, b.key);
     return o ? { choice: o, text: o } : null;
   }
+  if (b.datePart) {
+    const d = parseDate(text);
+    if (!d) return { text };
+    return { text: b.datePart === 'y' ? String(d.y) : String(b.datePart === 'd' ? d.d : d.m).padStart(2, '0') };
+  }
   if (b.charIndex != null) {
     const ch = String(text).replace(/[\s.\-/]/g, '')[b.charIndex];
     return ch ? { text: ch } : null;
@@ -273,18 +278,38 @@ async function processPdf(bytes, env, meta = {}) {
   try { fields = lib.getForm().getFields(); } catch { fields = []; }
   const values = env.values || {};
   const widgetRects = pages.map(() => []);
+  // The printed words next to a box: the rest of the text line to its left, the line above it,
+  // or the word right after it (tick boxes)
   const near = (page, rect) => {
-    const items = pages[page].items;
-    const sameRow = (it) => it.y < rect.y + rect.height + 2 && it.y + it.size * 0.8 > rect.y - 2;
-    const left = items.filter((it) => sameRow(it) && it.x + it.w <= rect.x + 3 && rect.x - (it.x + it.w) < 220)
-      .sort((a, b) => (b.x + b.w) - (a.x + a.w))[0];
-    const right = items.filter((it) => sameRow(it) && it.x >= rect.x + rect.width - 3 && it.x - (rect.x + rect.width) < 90)
-      .sort((a, b) => a.x - b.x)[0];
-    const above = items.filter((it) => it.y >= rect.y + rect.height - 2 && it.y - (rect.y + rect.height) < 2.5 * it.size && it.x < rect.x + rect.width && it.x + it.w > rect.x)
+    const P = pages[page];
+    const top = rect.y + rect.height, mid = rect.y + rect.height / 2;
+    const textOf = (l, x0, x1) => l.str.split('').filter((_, i) => l.chars[i] && l.chars[i].x0 >= x0 - 1 && l.chars[i].x1 <= x1 + 1).join('');
+    let left = null, above = null, right = null;
+    const rowLine = P.lines.filter((l) => l.y > rect.y - l.size * 0.5 && l.y < top && Math.abs(l.y + l.size * 0.3 - mid) < Math.max(rect.height, l.size))
+      .sort((a, b) => Math.abs(a.y - mid) - Math.abs(b.y - mid))[0];
+    if (rowLine) {
+      const before = textOf(rowLine, -1e9, rect.x + 2);
+      const lastCut = before.split(/\t|_{3,}|\.{4,}|\u2026/).pop();
+      if (lastCut.trim()) left = { str: lastCut.trim() };
+      // up to the next box on the same row
+      const nextBox = allRects[page].filter((r) => r.x > rect.x + rect.width - 1 && Math.abs(r.y - rect.y) < rect.height).map((r) => r.x).sort((a, b) => a - b)[0];
+      const after = textOf(rowLine, rect.x + rect.width - 2, Math.min(nextBox ?? 1e9, rect.x + rect.width + 220)).split(/\t/)[0];
+      if (after.trim()) right = { str: after.trim() };
+    }
+    const aboveLine = P.lines.filter((l) => l.y >= top - 2 && l.y - top < 2.6 * l.size && l.chars.some((c) => c.x1 > rect.x && c.x0 < rect.x + rect.width))
       .sort((a, b) => a.y - b.y)[0];
+    if (aboveLine) { const t = textOf(aboveLine, rect.x - 6, rect.x + rect.width).trim(); if (t) above = { str: t }; }
     return { left, right, above };
   };
-  const cls = (t) => t && classify(t, env.compiled, { ...opts, maxTail: 20 });
+  const allRects = pages.map(() => []);
+  for (const f of fields) { try { for (const w of f.acroField.getWidgets()) { const r = w.getRectangle(); allRects[findPage(w)].push(r); } } catch { /* skip */ } }
+  // printed labels lose their explanations: "5 Address (number, street…). See instructions." -> "5 Address"
+  const cls = (t, fuzzy = true) => {
+    if (!t) return null;
+    const core = t.replace(/\([^)]*\)?/g, ' ').split(/\.\s/)[0];
+    return classify(core, env.compiled, { ...opts, maxTail: 20, fuzzy, window: t });
+  };
+  const isGeneric = (n) => /^(text|field|fill|group|choice|check ?box|button|untitled|camp|undefined)?\s*\d*$/i.test(n.trim());
   for (const f of fields) {
     const type = f instanceof PDFLib.PDFTextField ? 'text' : f instanceof PDFLib.PDFSignature ? 'sig'
       : f instanceof PDFLib.PDFCheckBox ? 'check' : f instanceof PDFLib.PDFRadioGroup ? 'radio'
@@ -316,12 +341,13 @@ async function processPdf(bytes, env, meta = {}) {
     if (type === 'radio' || type === 'choice') {
       let options = [];
       try { options = f.getOptions(); } catch { options = []; }
-      const key = cls(name) || cls(left?.str) || cls(above?.str);
+      const generic = isGeneric(name) || (options.length && options.every((o) => isGeneric(o)));
+      const key = generic ? null : (cls(name, false) || cls(left?.str) || cls(above?.str));
       const optRects = type === 'radio' ? ws.map((x) => { const r = x.getRectangle(); return { x: r.x, y: r.y, w: r.width, h: r.height, page: findPage(x) }; }) : null;
       blanks.push({ ...base, options, optRects, key, before: (left?.str || above?.str || name).trim().slice(-40) + ' (' + options.slice(0, 4).join(' / ') + ')', canImage: false });
       continue;
     }
-    let key = type === 'sig' ? 'signature' : (cls(name) || cls(left?.str) || cls(above?.str));
+    let key = type === 'sig' ? 'signature' : ((!isGeneric(name) && cls(name, false)) || cls(left?.str) || cls(above?.str));
     let existing = '';
     if (type === 'text') { try { existing = f.getText() || ''; } catch { existing = ''; } }
     if (existing.trim()) key = null;
@@ -332,7 +358,7 @@ async function processPdf(bytes, env, meta = {}) {
     });
   }
   // A row of one-letter boxes (CNP in 13 boxes, a date in 8): each box gets one character
-  const singles = blanks.filter((b) => b.fieldType === 'text' && b.maxLen && b.maxLen <= 2)
+  const singles = blanks.filter((b) => b.fieldType === 'text' && b.maxLen === 1)
     .sort((a, b) => a.page - b.page || b.rect.y - a.rect.y || a.rect.x - b.rect.x);
   let run = [];
   const flush = () => {
@@ -349,12 +375,29 @@ async function processPdf(bytes, env, meta = {}) {
     else { flush(); run.push(b); }
   }
   flush();
+  // A date split into boxes on one row ("Data nașterii: [zz] [ll] [aaaa]")
+  const DATE_KEYS = { birth_date: 1, today: 1, id_issue_date: 1, id_expiry_date: 1 };
+  const texts = blanks.filter((b) => b.fieldType === 'text' && DATE_KEYS[b.key] && b.charIndex == null)
+    .sort((a, b) => a.page - b.page || b.rect.y - a.rect.y || a.rect.x - b.rect.x);
+  for (let i = 0; i < texts.length;) {
+    let j = i + 1;
+    while (j < texts.length && texts[j].key === texts[i].key && texts[j].page === texts[i].page && Math.abs(texts[j].rect.y - texts[i].rect.y) < 4) j++;
+    const grp = texts.slice(i, j);
+    if (grp.length === 3) {
+      const yearFirst = grp[0].maxLen === 4;
+      grp.forEach((b, k) => { b.datePart = (yearFirst ? 'ymd' : 'dmy')[k]; b.before += ' [' + { d: 'day', m: 'month', y: 'year' }[b.datePart] + ']'; });
+    }
+    i = j;
+  }
 
   // 2) Printed blanks: "Nume: ________", "Subsemnatul ………", "Semnătura:"
   const inWidget = (p, x0, y0, x1, y1) => widgetRects[p].some((r) => x0 < r.x + r.width + 4 && x1 > r.x - 4 && y0 < r.y + r.height + 2 && y1 > r.y - 2);
+  const lineSections = sectionsOf(pages.flatMap((P) => P.lines.map((l) => l.str)));
+  let lineNo = 0;
   pages.forEach((P, pi) => {
     const right = P.view[2] - 24;
     P.lines.forEach((l, li) => {
+      const section = lineSections[lineNo++];
       const found = findBlanks(l.str, { prevText: P.lines[li - 1]?.str || '', nextText: P.lines[li + 1]?.str || '' });
       for (const b of found) {
         const key = assignBlank(b, env.compiled, opts);
@@ -372,9 +415,11 @@ async function processPdf(bytes, env, meta = {}) {
           x = x0 + 1; maxW = x1 - x0 + 6;
           cover = { x: x0 - 0.5, y: l.y - 0.32 * l.size, w: x1 - x0 + 1, h: l.size * 1.15 };
         }
+        if (b.kind === 'boxes') { cover = null; x = l.chars[b.start].x0; }
         if (inWidget(pi, x, l.y - 2, x + Math.max(20, Math.min(maxW, 160)), l.y + size)) continue;
-        const it = { kind: 'text', optional, page: pi, key, x, y: l.y + (cover ? 0 : 0.1 * size), size, maxW, cover,
+        const it = { kind: 'text', optional, section, page: pi, key, x, y: l.y + (cover ? 0 : 0.1 * size), size, maxW, cover,
           ...contextSnippet(b), where: 'page ' + (pi + 1), canImage: true };
+        if (b.kind === 'boxes') { it.boxes = b.cells.map(([a, z]) => ({ x0: l.chars[a].x0, x1: l.chars[Math.max(a, z - 1)].x1 })); it.maxW = 0; }
         if (key === 'signature') sigPlacement(it, l, b);
         blanks.push(it);
       }
@@ -439,6 +484,8 @@ function setBlankKind(b, key, vault) {
   }
 }
 
+function boxChars(t) { return String(t).replace(/[\s.\-/]/g, ''); }
+
 function fitSize(b, text) {
   let size = b.size;
   if (b.maxW && b.maxW > 10) {
@@ -497,6 +544,15 @@ async function buildPdf(sess, valueOf, opts) {
     if (val.image) {
       const im = await sigImage(val.image);
       page.drawImage(im, { x: b.x, y: b.y, width: b.w, height: b.h });
+      continue;
+    }
+    if (b.boxes) {
+      const chars = boxChars(val.text);
+      b.boxes.forEach((bx, i) => {
+        if (!chars[i]) return;
+        const w = font.widthOfTextAtSize(chars[i], b.size);
+        page.drawText(chars[i], { x: (bx.x0 + bx.x1) / 2 - w / 2, y: b.y + (b.y0shift || 0), size: b.size, font, color: ink });
+      });
       continue;
     }
     if (b.cover && opts.cover) page.drawRectangle({ x: b.cover.x, y: b.cover.y, width: b.cover.w, height: b.cover.h, color: PDFLib.rgb(1, 1, 1) });
@@ -590,7 +646,19 @@ class PdfEditor {
       const text = val ? val.text : '⚠ ' + fieldLabel(b.key, this.app.vault) + ' (empty)';
       const size = val ? fitSize(b, text) : b.size;
       const [x, y] = pt(b.x, b.y);
-      el = h('div', { class: 'ov text' + (val ? '' : ' missing'), text });
+      el = h('div', { class: 'ov text' + (val ? '' : ' missing'), text: b.boxes && val ? '' : text });
+      if (b.boxes && val) {
+        // one character in the middle of each box
+        const chars = boxChars(val.text);
+        el.style.width = (b.boxes[b.boxes.length - 1].x1 - b.boxes[0].x0) * s + 'px';
+        el.style.height = size * s + 'px';
+        b.boxes.forEach((bx, i) => {
+          if (!chars[i]) return;
+          const c = h('span', { text: chars[i] });
+          Object.assign(c.style, { position: 'absolute', left: ((bx.x0 + bx.x1) / 2 - b.boxes[0].x0) * s + 'px', transform: 'translateX(-50%)' });
+          el.append(c);
+        });
+      }
       const ink = this.app.settings().ink === 'blue' ? '#0d2a8c' : '#111';
       Object.assign(el.style, { left: x + 'px', top: y - 0.846 * size * s + 'px', fontSize: size * s + 'px', color: val ? ink : '' });
       if (val && b.cover && this.app.cover()) {

@@ -1,7 +1,7 @@
 // Drives autofill.html in a real browser: makes a vault, fills every fixture, saves the outputs.
 // Run: node tests/e2e.mjs [chromium|webkit|firefox]
 import { chromium, webkit, firefox } from 'playwright';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const engine = { chromium, webkit, firefox }[process.argv[2] || 'chromium'];
@@ -44,10 +44,13 @@ await page.waitForFunction(() => App.vault.signature, null, { timeout: 5000 }).c
 await click('#save-vault');
 await click('.tabs button[data-tab="fill"]');
 
-const files = process.argv[3] ? [process.argv[3]] : readdirSync(root + 'tests/fixtures').filter((f) => !f.startsWith('.') && !f.endsWith('.py'));
+// argv[3]: a fixture name, or a folder (e.g. tests/real) to run every file in it
+const arg = process.argv[3];
+const dir = arg && statSync(arg, { throwIfNoEntry: false })?.isDirectory() ? arg.replace(/\/?$/, '/') : root + 'tests/fixtures/';
+const files = arg && dir.endsWith('fixtures/') ? [arg] : readdirSync(dir).filter((f) => !f.startsWith('.') && !f.endsWith('.py'));
 for (const f of files) {
-  await page.setInputFiles('#doc-file', root + 'tests/fixtures/' + f);
-  try { await page.waitForSelector('#work[data-ready]', { timeout: 15000 }); }
+  await page.setInputFiles('#doc-file', dir + f);
+  try { await page.waitForSelector('#work[data-ready]', { timeout: 120000 }); }
   catch { console.log(`\n### ${f}: did not open`, await page.locator('#toasts').innerText()); continue; }
   const summary = await page.locator('#doc-summary').innerText();
   const rows = await page.$$eval('#blank-list .row', (rs) => rs.map((r) => {

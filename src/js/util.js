@@ -101,3 +101,15 @@ function serializeXml(doc) {
   if (!s.startsWith('<?xml')) s = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + s;
   return s;
 }
+
+// Text files are not always UTF-8: old Romanian pages use ISO-8859-2 / Windows-1250
+function decodeText(bytes) {
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return dec.decode(bytes.subarray(3));
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { /* not UTF-8 */ }
+  const head = new TextDecoder('latin1').decode(bytes.subarray(0, 4096));
+  const m = /charset\s*=\s*["']?([\w-]+)/i.exec(head) || /\\ansicpg(\d+)/.exec(head);
+  let cs = m ? (/^\d+$/.test(m[1]) ? 'windows-' + m[1] : m[1]) : 'windows-1250';
+  try { return new TextDecoder(cs).decode(bytes); } catch { return new TextDecoder('windows-1250').decode(bytes); }
+}

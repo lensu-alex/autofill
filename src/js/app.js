@@ -339,7 +339,7 @@ const App = {
     if (!v) return null;
     // "(cu majuscule)", "in capital letters"
     if (/majuscul|litere mari|litere de tipar|capital letters|block letters|in capitals/i.test((b.before || '') + ' ' + (b.labelText || '') + ' ' + (b.after || ''))) v = v.toLocaleUpperCase('ro');
-    if (b.kind === 'field' && (b.fieldType !== 'text' || b.charIndex != null) && b.fieldType !== 'sig') return fieldValue(b, v);
+    if (b.kind === 'field' && (b.fieldType !== 'text' || b.charIndex != null || b.datePart) && b.fieldType !== 'sig') return fieldValue(b, v);
     return { text: v };
   },
 
@@ -434,7 +434,8 @@ const App = {
           h('span', { text: b.before ? '…' + b.before : '' }), h('mark', { text: ' ▢ ' }), h('span', { text: b.after ? b.after + '…' : '' })),
         h('div', { class: 'pick' }, this.fieldSelect(b, (k, t) => this.setKey(b, k, t)), h('div', { class: 'val' }, preview)),
         tooLong ? h('div', { class: 'warn', text: '⚠ Longer than the blank: check it on the page, drag it or make it smaller' }) : null,
-        b.guess && val ? h('div', { class: 'warn', text: '≈ Best guess from similar wording: please check' }) : null);
+        b.guess && val ? h('div', { class: 'warn', text: '≈ Best guess from similar wording: please check' }) : null,
+        b.otherPerson && !b.key ? h('div', { class: 'warn', text: 'In a section about someone else (' + b.section.slice(0, 40) + '): left empty' }) : null);
       if (this.editor) row.addEventListener('click', (e) => { if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'OPTION') this.editor.select(b, true); });
       list.append(row);
     }

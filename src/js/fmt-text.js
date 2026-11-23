@@ -7,21 +7,22 @@ function rtfEscape(s) {
 }
 
 async function processText(bytes, env, ext) {
-  const original = dec.decode(bytes);
+  const original = decodeText(bytes);
   const lines = original.split(/(\r?\n)/); // keep line endings
   const textLines = lines.filter((_, i) => i % 2 === 0);
   const opts = { docHasPrenume: /prenume/.test(norm(original)) };
   const esc = ext === 'rtf' ? rtfEscape : (s) => s;
   const blanks = [];
+  const sections = sectionsOf(textLines);
   textLines.forEach((line, li) => {
     for (const b of findBlanks(line, { prevText: textLines[li - 1] || '', nextText: textLines[li + 1] || '' })) {
       const key = assignBlank(b, env.compiled, opts);
       const optional = b.kind === 'insert' && !key;
-      blanks.push({ key, optional, ...contextSnippet(b), where: 'line ' + (li + 1), kind: b.kind, canImage: false,
+      blanks.push({ key, optional, ...contextSnippet(b), where: 'line ' + (li + 1), kind: b.kind, canImage: false, section: sections[li],
         apply(val) {
           if (val.text == null) return;
           const cur = lines[li * 2];
-          lines[li * 2] = cur.slice(0, b.start) + esc(padValue(line, b, val.text)) + cur.slice(b.end);
+          lines[li * 2] = cur.slice(0, b.start) + esc(fillValue(line, b, val.text)) + cur.slice(b.end);
         } });
     }
   });
@@ -34,7 +35,11 @@ async function processText(bytes, env, ext) {
 const HTML_BLOCKS = new Set(['P', 'DIV', 'LI', 'TD', 'TH', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'DT', 'DD', 'LABEL', 'BLOCKQUOTE', 'PRE', 'SECTION', 'ARTICLE', 'BODY', 'TR', 'TABLE', 'UL', 'OL', 'FORM', 'HEADER', 'FOOTER', 'MAIN', 'FIELDSET', 'CAPTION']);
 
 async function processHtml(bytes, env) {
-  const doc = new DOMParser().parseFromString(dec.decode(bytes), 'text/html');
+  const doc = new DOMParser().parseFromString(decodeText(bytes), 'text/html');
+  // the output is saved as UTF-8
+  doc.querySelectorAll('meta[charset], meta[http-equiv="Content-Type" i]').forEach((m) => m.remove());
+  const cm = doc.createElement('meta'); cm.setAttribute('charset', 'utf-8');
+  (doc.head || doc.documentElement).prepend(cm);
   const opts = { docHasPrenume: /prenume/.test(norm(doc.body?.textContent || '')) };
   const blanks = [];
 
@@ -73,6 +78,7 @@ async function processHtml(bytes, env) {
   const segsOf = (nodes) => { let pos = 0; return nodes.map((node) => { const s = { start: pos, end: pos + node.data.length, node }; pos = s.end; return s; }); };
   const paras = [...groups.values()];
   const texts = paras.map((nodes) => nodes.map((n) => n.data).join(''));
+  const sections = sectionsOf(texts);
   paras.forEach((nodes, i) => {
     const text = texts[i];
     if (!text.trim()) return;
@@ -80,7 +86,7 @@ async function processHtml(bytes, env) {
     for (const b of findBlanks(text, { prevText: texts[i - 1] || '', nextText: texts[i + 1] || '' })) {
       const key = assignBlank(b, env.compiled, opts);
       const optional = b.kind === 'insert' && !key;
-      blanks.push({ key, optional, ...contextSnippet(b), where: 'page text', kind: b.kind, canImage: true,
+      blanks.push({ key, optional, ...contextSnippet(b), where: 'page text', kind: b.kind, canImage: true, section: sections[i],
         apply(val) {
           if (val.image) {
             const pos = editSegments(segs, b.start, b.end, b.kind === 'insert' ? ' ' : '');
@@ -89,7 +95,7 @@ async function processHtml(bytes, env) {
             img.setAttribute('alt', 'signature');
             img.setAttribute('style', 'height:3em;vertical-align:bottom');
             if (pos) { const rest = pos.seg.node.splitText(pos.offset); rest.parentNode.insertBefore(img, rest); }
-          } else editSegments(segs, b.start, b.end, padValue(text, b, val.text));
+          } else editSegments(segs, b.start, b.end, fillValue(text, b, val.text));
         } });
     }
   });

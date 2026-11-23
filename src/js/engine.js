@@ -2,6 +2,8 @@
 // Finds blanks in a line/paragraph of text and edits text split across many nodes.
 
 const PH_RE = /\{\{\s*([^{}]{1,60}?)\s*\}\}|«\s*([^«»]{1,60}?)\s*»|\[\[\s*([^\[\]]{1,60}?)\s*\]\]/g;
+// "|__|__|__|" one box per character (CNP, codes)
+const BOX_RE = /\|(?:[ _\u00a0]{1,4}\|){3,}/g;
 const FILL_RE = /[_.…][_.… \t ]*[_.…]/g;
 // "Nume:" followed by a tab, the end of the line, or a wide gap
 const COLON_RE = /:(?=[  ]*(?:\t|$)|[  ]{3,}\S)/g;
@@ -20,6 +22,13 @@ function findBlanks(text, ctx = {}) {
 
   for (const m of text.matchAll(PH_RE)) {
     out.push({ start: m.index, end: m.index + m[0].length, kind: 'placeholder', name: m[1] || m[2] || m[3] });
+  }
+  for (const m of text.matchAll(BOX_RE)) {
+    if (overlaps(m.index, m.index + m[0].length)) continue;
+    const cells = [];
+    let p = m.index + 1;
+    for (const part of m[0].slice(1, -1).split('|')) { cells.push([p, p + part.length]); p += part.length + 1; }
+    out.push({ start: m.index, end: m.index + m[0].length, kind: 'boxes', cells });
   }
   for (const m of text.matchAll(FILL_RE)) {
     let s = m.index, e = s + m[0].length, str = m[0];
@@ -64,7 +73,16 @@ function assignBlank(b, compiled, opts) {
     if (direct) return direct.key[0] === '@' ? null : direct.key;
     return classify(b.name, compiled, { ...opts, maxTail: 40 });
   }
-  let k = classify(b.label, compiled, { ...opts, window: b.window, fuzzyMin: b.kind === 'insert' ? 0.75 : opts.fuzzyMin });
+  let k;
+  if (b.kind === 'insert') {
+    // "Label:" with nothing after it. Sentences that end in ":" ("se face cu:", "I certify that:")
+    // are not labels: the label must be short and end with the field word; headings in CAPITALS are skipped.
+    const lab = b.label.replace(/\([^)]*\)/g, ' ').split(/[.;!?]\s/).pop().trim();
+    const words = lab.split(/\s+/).filter(Boolean);
+    const caps = lab.replace(/[^A-Za-zĂÂÎȘȚăâîșț]/g, '');
+    if (!words.length || words.length > 7 || (words.length >= 2 && caps.length > 4 && caps === caps.toUpperCase())) return null;
+    k = classify(lab, compiled, { ...opts, window: b.window, maxTail: 3, maxLead: 2, fuzzy: words.length <= 3, fuzzyMin: 0.75 });
+  } else k = classify(b.label, compiled, { ...opts, window: b.window });
   b.guess = !!(k && classify.lastGuess);
   if (!k) {
     // "______ (nume și prenume)" — the hint is after the blank
@@ -72,6 +90,13 @@ function assignBlank(b, compiled, opts) {
     if (m) { k = classify(m[1], compiled, { ...opts, maxTail: 30 }); b.guess = !!(k && classify.lastGuess); }
   }
   return k;
+}
+
+// What replaces a blank in text: boxes get one character each, other blanks the padded value
+function fillValue(text, b, value) {
+  if (b.kind !== 'boxes') return padValue(text, b, value);
+  const chars = String(value).replace(/[\s.\-/]/g, '');
+  return '|' + b.cells.map(([s, e], i) => (chars[i] || '').padEnd(Math.max(1, Math.min(2, e - s)) , ' ').slice(0, Math.max(1, e - s))).join('|') + '|';
 }
 
 // Text to put into a blank, with spaces so it does not touch the label
@@ -149,9 +174,33 @@ function contextSnippet(b) {
 // Second look using neighbours: "domiciliat în ____, str. ____ nr. __" wants only the city
 // in the first blank, because the street comes separately.
 function refineKeys(blanks) {
+  applySections(blanks);
   blanks.forEach((b, i) => {
     if (b.key !== 'address') return;
     const next = blanks.slice(i + 1, i + 4);
     if (next.some((n) => n.key === 'street' || n.key === 'street_number')) b.key = 'city';
   });
+}
+
+// Section headings ("DATE PRIVIND COPIII MINORI", "Date despre soț/soție") tell whose details follow.
+// texts: paragraph/line texts in order; returns the heading in force for each one.
+function sectionsOf(texts) {
+  let cur = '';
+  return texts.map((t) => {
+    const x = t.trim();
+    const letters = x.replace(/[^A-Za-zĂÂÎȘȚăâîșțŞŢşţ]/g, '');
+    const caps = letters && letters.replace(/[^A-ZĂÂÎȘȚŞŢ]/g, '').length / letters.length;
+    const hasBlank = /_{3,}|\.{4,}|\u2026/.test(x);
+    if (x && x.length <= 90 && !hasBlank && letters.length >= 4 && (caps > 0.6 || /:$/.test(x))) cur = x;
+    return cur;
+  });
+}
+const OTHER_SECTION = /\b(copil|copii|copiii|copiilor|copilului|minor|minori|minorului|parinti|parintilor|sot|sotie|sotului|sotiei|reprezentant|reprezentantului|imputernicit|imputernicitului|tutore|garant|codebitor|mostenitor|decedat|defunct|child|children|spouse|parent|parents|guardian|representative|requester)\b/;
+const SELF_SECTION = /\b(solicitant|solicitantului|subsemnat|titular|titularului|date personale|applicant|your details|personal details|despre dumneavoastra)\b/;
+function applySections(blanks) {
+  for (const b of blanks) {
+    if (!b.section || !b.key || b.key === 'today' || b.key === 'signature') continue;
+    const n = norm(b.section);
+    if (OTHER_SECTION.test(n) && !SELF_SECTION.test(n)) { b.key = null; b.guess = false; b.otherPerson = true; }
+  }
 }

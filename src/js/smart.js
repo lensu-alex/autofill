@@ -111,7 +111,10 @@ const Smart = {
   // Fills in keys for blanks nothing else recognised. Returns how many it placed.
   async pass(blanks, vault, progress) {
     // unknown blanks, and blanks the letter-similarity only guessed
-    const todo = blanks.filter((b) => (!b.key || (b.guess && !b.smart)) && (b.labelText || b.before) && b.fieldType !== 'check' && b.charIndex == null);
+    const words = (b) => String(b.labelText || b.before).replace(/\([^)]*\)/g, ' ').split(/[.;!?]\s/).pop().trim().split(/\s+/).filter(Boolean).length;
+    const todo = blanks.filter((b) => (!b.key || (b.guess && !b.smart)) && (b.labelText || b.before)
+      && !['check', 'radio', 'choice', 'sig'].includes(b.fieldType) && b.charIndex == null
+      && !(b.optional && words(b) > 4)); // "Label:" lines that may just be sentences
     if (!todo.length) return 0;
     if (!(await this.load(progress))) return 0;
     progress && progress('Smart matching: understanding the form…');
@@ -138,7 +141,7 @@ const Smart = {
       const ranked = [...best.entries()].sort((a, b) => b[1] - a[1]);
       const [k1, s1] = ranked[0], s2 = ranked[1] ? ranked[1][1] : 0;
       // the model is only trusted when one field clearly wins
-      if (s1 >= (b.key ? 0.7 : 0.6) && s1 - s2 >= 0.1) {
+      if (s1 >= (b.key ? 0.72 : 0.66) && s1 - s2 >= 0.12) {
         if (b.fieldType === 'sig' || (k1 === 'signature' && b.canImage === false)) return;
         b.key = k1; b.guess = true; b.smart = true; b.smartScore = s1; placed++;
       }

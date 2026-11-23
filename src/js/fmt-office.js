@@ -31,6 +31,7 @@ function preserve(t) { t.setAttributeNS(XML_NS, 'xml:space', 'preserve'); }
 function paragraphBlanks(paras, segsOf, env, opts, where, insertImage, skipInsert) {
   const out = [];
   const texts = paras.map((p) => textOfSegs(segsOf(p)));
+  const sections = sectionsOf(texts);
   paras.forEach((p, i) => {
     if (!texts[i].trim()) return;
     const segs = segsOf(p);
@@ -40,14 +41,14 @@ function paragraphBlanks(paras, segsOf, env, opts, where, insertImage, skipInser
       const key = assignBlank(b, env.compiled, opts);
       const optional = b.kind === 'insert' && !key; // "Note:" etc. — hidden unless smart matching knows it
       out.push({
-        key, optional, ...contextSnippet(b), where, kind: b.kind, canImage: !!insertImage,
+        key, optional, ...contextSnippet(b), where, kind: b.kind, section: sections[i], canImage: !!insertImage,
         apply(val) {
           if (val.image) {
             if (!insertImage) return;
             const pos = editSegments(segs, b.start, b.end, b.kind === 'insert' ? ' ' : '');
             insertImage(p, pos, val.image);
           } else {
-            const pos = editSegments(segs, b.start, b.end, padValue(text, b, val.text));
+            const pos = editSegments(segs, b.start, b.end, fillValue(text, b, val.text));
             if (pos && pos.seg.t) preserve(pos.seg.t);
           }
         },
@@ -566,7 +567,7 @@ async function processXlsx(bytes, env) {
         edited.push(state);
         for (const b of list) {
           blanks.push({ key: b.key, ...contextSnippet(b), where: where + ' ' + ref, kind: b.kind, canImage: false,
-            apply(val) { if (val.text != null) state.text = state.text.slice(0, b.start) + padValue(text, b, val.text) + state.text.slice(b.end); } });
+            apply(val) { if (val.text != null) state.text = state.text.slice(0, b.start) + fillValue(text, b, val.text) + state.text.slice(b.end); } });
         }
       };
       if (real.length) { cellBlank(real); continue; }

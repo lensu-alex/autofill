@@ -105,7 +105,7 @@ function coverage(q, phrase) {
 }
 
 // The label's last few words, compared at several lengths; returns {key, score} or null
-function fuzzyClassify(label, compiled, min = 0.66) {
+function fuzzyClassify(label, compiled, min = 0.7) {
   if (_fzFor !== compiled) { _fz = buildFuzzy(compiled); _fzFor = compiled; }
   const words = norm(cleanLabel(label)).split(' ').filter((w) => w && !/^\d+$/.test(w)).slice(-5);
   let best = null;
