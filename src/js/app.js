@@ -3,13 +3,14 @@
 
 const OFFICE = {
   docx: processDocx, docm: processDocx, dotx: processDocx,
-  odt: processOdt, ott: processOdt,
+  odt: processOdt, ott: processOdt, ods: processOdt, ots: processOdt, odp: processOdt, otp: processOdt, odg: processOdt,
   pptx: processPptx,
   xlsx: processXlsx, xlsm: processXlsx,
   html: processHtml, htm: processHtml,
   txt: processText, md: processText, csv: processText, tsv: processText, rtf: processText, text: processText,
 };
-const IMAGES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif' };
+const IMAGES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', tif: 'image/tiff', tiff: 'image/tiff', avif: 'image/avif' };
+const APPLE = { pages: 'Pages', numbers: 'Numbers', key: 'Keynote' };
 const OLD_FORMATS = { doc: 'Word', xls: 'Excel', ppt: 'PowerPoint' };
 
 const App = {
@@ -269,19 +270,20 @@ const App = {
     try {
       let sess;
       let notice = '';
-      if (ext === 'pdf' || IMAGES[ext] || ext === 'pages') {
+      if (ext === 'pdf' || IMAGES[ext] || APPLE[ext]) {
         let pdfBytes = bytes, px = null;
-        if (ext === 'pages') {
+        if (APPLE[ext]) {
           const pv = await pagesPreview(bytes);
           const r = await imageToPdf(pv.bytes, pv.type);
           pdfBytes = r.bytes; px = r.px;
-          notice = 'Pages files can only be read from their preview picture (page 1). For a sharper result: in Pages choose File → Export To → Word (or PDF) and drop that file here.';
+          notice = `${APPLE[ext]} files can only be read from their preview picture (first page). For a sharper result: in ${APPLE[ext]} choose File → Export To → ${ext === 'numbers' ? 'Excel' : ext === 'key' ? 'PowerPoint' : 'Word'} (or PDF) and drop that file here.`;
         } else if (IMAGES[ext]) {
           const r = await imageToPdf(bytes, IMAGES[ext]);
           pdfBytes = r.bytes; px = r.px;
         }
         const res = await processPdf(pdfBytes, env);
         sess = { type: 'pdf', name: file.name, bytes: pdfBytes, px, ...res };
+        // multi-page TIFFs etc. keep their own size for PNG export (first page only)
         if (res.scanned) notice = (notice ? notice + ' ' : '') + 'No text could be read on this picture. Click on the page where each thing should go.';
         else if (res.xfa) notice = (notice ? notice + ' ' : '') + 'This is an Adobe "XFA" form, which only Adobe Reader can fill properly. Your info will be written on top of the page instead; check the result.';
         else if (res.ocrUsed) notice = (notice ? notice + ' ' : '') + 'This is a scan/photo: its text was read automatically, so check that everything sits in the right place (drag to adjust, click the page to add more).';
@@ -306,7 +308,7 @@ const App = {
       $('#work').classList.toggle('visual', visual);
       $('#cover-wrap').hidden = !visual || !sess.blanks.some((b) => b.cover);
       $('#cover').checked = true;
-      $('#save-png').hidden = !sess.px;
+      $('#save-png').hidden = !sess.px || sess.pages.length > 1;
       $('#save-doc').textContent = sess.px ? 'Download as PDF' : 'Download filled file';
       this.editor = null;
       if (visual) { this.editor = new PdfEditor($('#editor'), sess, this); await this.editor.render(); }

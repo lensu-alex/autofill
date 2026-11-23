@@ -116,3 +116,15 @@ for _ in range(60000):
 im = im.rotate(0.4, fillcolor=242, resample=Image.BICUBIC)
 im.convert('RGB').save(os.path.join(D, 'scan2.jpg'), quality=70)
 print('scan2 written')
+
+# --- Multi-page TIFF (fax/scanner style) and a fake Numbers file
+p1 = Image.new('L', (1240, 1754), 255); g1 = ImageDraw.Draw(p1)
+fA = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 36)
+g1.text((120, 200), 'Nume și prenume: ______________________', fill=0, font=fA)
+p2 = Image.new('L', (1240, 1754), 255); g2 = ImageDraw.Draw(p2)
+g2.text((120, 200), 'Telefon: ______________________', fill=0, font=fA)
+p1.save(os.path.join(D, 'fax.tif'), save_all=True, append_images=[p2], compression='tiff_deflate')
+with zipfile.ZipFile(os.path.join(D, 'sheet.numbers'), 'w') as z:
+    z.writestr('Index/Document.iwa', b'\x00')
+    z.writestr('preview.jpg', buf.getvalue())
+print('tiff + numbers written')

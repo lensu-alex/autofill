@@ -13,6 +13,8 @@ const vendor = [
   nm('pdfjs-dist/build/pdf.worker.min.js'),
   nm('pdfjs-dist/build/pdf.min.js'),
   nm('tesseract.js/dist/tesseract.min.js'),
+  nm('pako/dist/pako.min.js'),
+  nm('utif/UTIF.js'),
 ];
 // OCR engine + language data: stored as base64, decoded only when a scan is opened
 const bin = (p) => readFileSync(new URL('./node_modules/' + p, import.meta.url)).toString('base64');

@@ -15,19 +15,50 @@ function pdfjsOpen(bytes) {
   return pdfjsLib.getDocument({ data: bytes.slice(), isEvalSupported: false, fontExtraProperties: true, disableAutoFetch: true, disableStream: true }).promise;
 }
 
+// Pictures -> canvases (TIFF can have many pages; Chrome can't decode TIFF itself)
+async function imageCanvases(bytes, type) {
+  try {
+    const bmp = await createImageBitmap(new Blob([bytes], { type }));
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(bmp, 0, 0);
+    return [c];
+  } catch (e) {
+    if (!/tiff/.test(type) || typeof UTIF === 'undefined') {
+      if (/hei[cf]/.test(type)) throw new Error('This browser can\'t open HEIC photos. Open it in Preview → File → Export → JPEG, or use Safari.');
+      throw new Error('Could not read this picture');
+    }
+    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const ifds = UTIF.decode(buf);
+    const out = [];
+    for (const ifd of ifds) {
+      if (!ifd.width && !ifd.t256) continue;
+      UTIF.decodeImage(buf, ifd, ifds);
+      const rgba = UTIF.toRGBA8(ifd);
+      const c = document.createElement('canvas');
+      c.width = ifd.width; c.height = ifd.height;
+      c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer), ifd.width, ifd.height), 0, 0);
+      out.push(c);
+    }
+    if (!out.length) throw new Error('Could not read this TIFF');
+    return out;
+  }
+}
+
 async function imageToPdf(bytes, type) {
-  const bmp = await createImageBitmap(new Blob([bytes], { type }));
-  const c = document.createElement('canvas');
-  c.width = bmp.width; c.height = bmp.height;
-  c.getContext('2d').drawImage(bmp, 0, 0);
+  const canvases = await imageCanvases(bytes, type);
   const isJpg = /jpe?g/.test(type);
-  const out = await new Promise((r) => c.toBlob(r, isJpg ? 'image/jpeg' : 'image/png', 0.92));
-  const imgBytes = new Uint8Array(await out.arrayBuffer());
   const doc = await PDFLib.PDFDocument.create();
-  const img = isJpg ? await doc.embedJpg(imgBytes) : await doc.embedPng(imgBytes);
-  const W = 595.28, H = W * bmp.height / bmp.width;
-  doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
-  return { bytes: await doc.save(), px: { w: bmp.width, h: bmp.height } };
+  for (const c of canvases) {
+    const out = await new Promise((r) => c.toBlob(r, isJpg ? 'image/jpeg' : 'image/png', 0.92));
+    const imgBytes = new Uint8Array(await out.arrayBuffer());
+    const img = isJpg ? await doc.embedJpg(imgBytes) : await doc.embedPng(imgBytes);
+    const W = 595.28, H = W * c.height / c.width;
+    doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+  }
+  return { bytes: await doc.save(), px: { w: canvases[0].width, h: canvases[0].height }, pages: canvases.length };
 }
 
 // Pages files are zip packages holding a preview picture of page 1

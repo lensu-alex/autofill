@@ -16,6 +16,7 @@ const NS = {
   svg: 'urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0',
   xlink: 'http://www.w3.org/1999/xlink',
   manifest: 'urn:oasis:names:tc:opendocument:xmlns:manifest:1.0',
+  office: 'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
 };
 const SIG_NAME = 'autofill_signature.png';
 
@@ -321,6 +322,26 @@ function oSegs(p) {
   return segs;
 }
 
+// Spreadsheets store runs of empty cells/rows as one element "repeated N times"; split before writing
+function oUnrepeat(cell) {
+  const T = NS.table;
+  const row = cell.parentNode;
+  const m = +(row.getAttributeNS(T, 'number-rows-repeated') || 1);
+  if (m > 1) {
+    const rest = row.cloneNode(true);
+    row.removeAttributeNS(T, 'number-rows-repeated');
+    if (m - 1 > 1) rest.setAttributeNS(T, 'table:number-rows-repeated', String(m - 1)); else rest.removeAttributeNS(T, 'number-rows-repeated');
+    row.parentNode.insertBefore(rest, row.nextSibling);
+  }
+  const n = +(cell.getAttributeNS(T, 'number-columns-repeated') || 1);
+  if (n > 1) {
+    const rest = cell.cloneNode(true);
+    cell.removeAttributeNS(T, 'number-columns-repeated');
+    if (n - 1 > 1) rest.setAttributeNS(T, 'table:number-columns-repeated', String(n - 1)); else rest.removeAttributeNS(T, 'number-columns-repeated');
+    row.insertBefore(rest, cell.nextSibling);
+  }
+}
+
 async function processOdt(bytes, env) {
   const zip = await JSZip.loadAsync(bytes);
   const names = ['content.xml', 'styles.xml'].filter((n) => zip.file(n));
@@ -360,6 +381,7 @@ async function processOdt(bytes, env) {
       } else p.appendChild(f);
     };
     const labelCells = new Set();
+    const isSheet = doc.getElementsByTagNameNS(NS.office, 'spreadsheet').length > 0;
     for (const tbl of doc.getElementsByTagNameNS(NS.table, 'table')) {
       const rows = [...tbl.getElementsByTagNameNS(NS.table, 'table-row')]
         .filter((r) => closestNS(r, NS.table, 'table') === tbl)
@@ -370,6 +392,8 @@ async function processOdt(bytes, env) {
         blanks.push({
           key: tb.key, before: tb.label, after: '', where: where || 'table', kind: 'cell', canImage: true,
           apply(val) {
+            oUnrepeat(tb.cell);
+            if (isSheet) { tb.cell.setAttributeNS(NS.office, 'office:value-type', 'string'); }
             let p = kids(tb.cell, NS.text, 'p')[0];
             if (!p) { p = doc.createElementNS(NS.text, 'text:p'); tb.cell.appendChild(p); }
             if (val.image) p.appendChild(frame(doc, val.image));
@@ -402,7 +426,7 @@ async function processOdt(bytes, env) {
       }
       const mt = zip.file('mimetype');
       if (mt) zip.file('mimetype', await mt.async('string'), { compression: 'STORE' });
-      return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: 'application/vnd.oasis.opendocument.text' });
+      return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', mimeType: mt ? (await mt.async('string')).trim() : 'application/vnd.oasis.opendocument.text' });
     },
   };
 }

@@ -115,7 +115,9 @@ function textOfSegs(segs) { return segs.map((s) => (s.node ? s.node.data : s.tex
 function tableBlanks(rows, text, compiled, opts) {
   const out = [];
   const used = new Set();
-  const isLabel = (t) => t && t.length <= 60 && classify(t, compiled, { ...opts, maxTail: 14, fuzzyMin: 0.75 });
+  // a cell that has its own blank ("Nume: ____") is filled inside, not next to it
+  const isLabel = (t) => t && t.length <= 60 && !findBlanks(t).some((b) => b.kind !== 'insert')
+    && classify(t, compiled, { ...opts, maxTail: 14, fuzzyMin: 0.75 });
   rows.forEach((row, r) => {
     row.forEach((cell, c) => {
       const t = text(cell).trim();
