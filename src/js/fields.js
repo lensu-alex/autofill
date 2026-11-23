@@ -59,6 +59,13 @@ const FIELD_DEFS = [
 // Not stored: filled automatically
 const SPECIAL_FIELDS = [
   { key: 'today', label: "Today's date", syn: ['data completarii', 'data semnarii', 'today', 'today s date'] },
+  { key: 'age', label: 'Age (from birth date)', syn: ['varsta', 'varsta ani', 'in varsta de', 'age', 'years old', 'ani impliniti'] },
+  { key: 'birth_day', label: 'Birth day (dd)', syn: ['ziua nasterii'] },
+  { key: 'birth_month', label: 'Birth month (mm)', syn: ['luna nasterii'] },
+  { key: 'birth_year', label: 'Birth year (yyyy)', syn: ['anul nasterii', 'year of birth'] },
+  { key: 'today_day', label: "Today's day (dd)", syn: [] },
+  { key: 'today_month', label: "Today's month (mm)", syn: [] },
+  { key: 'today_year', label: "Today's year (yyyy)", syn: [] },
   { key: 'signature', label: '✍︎ Signature', syn: ['semnatura', 'semnatura solicitantului', 'semnatura titularului', 'semnatura elevului', 'semnatura studentului', 'semnatura candidatului', 'semnatura mea', 'signature', 'signed', 'sign here', 'applicant signature', 'applicant s signature', 'semnat'] },
 ];
 
@@ -68,6 +75,9 @@ const AMBIGUOUS = [
   { key: '@date', syn: ['data', 'date', 'la data de', 'la data', 'din data de', 'pe data de', 'in data de', 'data de'] },
   { key: '@nume', syn: ['nume', 'numele'] },
   { key: '@in', syn: ['in'] },
+  { key: '@zi', syn: ['ziua', 'zi', 'day'] },
+  { key: '@luna', syn: ['luna', 'month'] },
+  { key: '@an', syn: ['anul', 'an', 'year'] },
 ];
 const AMBIG_CONTEXT = {
   '@nr': [
@@ -80,6 +90,9 @@ const AMBIG_CONTEXT = {
     ['id_issue_date', ['eliberat', 'eliberata', 'emis', 'emisa', 'issued', 'eliberarii']],
     ['birth_date', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']],
   ],
+  '@zi': [['birth_day', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_day', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
+  '@luna': [['birth_month', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_month', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
+  '@an': [['birth_year', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_year', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
   '@in': [
     ['birth_place', ['nascut', 'nascuta', 'nastere']],
     ['address', ['domiciliat', 'domiciliata', 'domiciliul', 'locuiesc', 'locuieste', 'resedinta']],
@@ -147,7 +160,7 @@ function classify(label, compiled, opts = {}) {
     }
   }
   if (pick) return pick;
-  return best.key === '@date' ? 'today' : null;
+  return { '@date': 'today', '@zi': 'today_day', '@luna': 'today_month', '@an': 'today_year' }[best.key] || null;
 }
 
 function fieldLabel(key, vault) {
@@ -162,7 +175,30 @@ function computeValues(vault) {
   const v = { ...(vault?.values || {}) };
   for (const c of vault?.custom || []) if (c.value) v[c.key] = c.value;
   for (const k of Object.keys(v)) if (typeof v[k] === 'string') v[k] = v[k].trim();
-  if (!v.full_name && (v.first_name || v.last_name)) v.full_name = [v.first_name, v.last_name].filter(Boolean).join(' ');
+  const fmt = vault?.settings?.dateFormat;
+  // A Romanian CNP holds sex and birth date: S YY MM DD …
+  const cnp = /^([1-8])(\d\d)(\d\d)(\d\d)\d{6}$/.exec((v.cnp || '').replace(/\s/g, ''));
+  if (cnp) {
+    const cent = { 1: 1900, 2: 1900, 3: 1800, 4: 1800, 5: 2000, 6: 2000, 7: 1900, 8: 1900 }[cnp[1]];
+    const d = new Date(cent + +cnp[2], +cnp[3] - 1, +cnp[4]);
+    if (!v.birth_date && d.getDate() === +cnp[4]) v.birth_date = formatDate(d, fmt);
+    if (!v.gender) v.gender = +cnp[1] % 2 ? 'M' : 'F';
+  }
+  if (!v.full_name && (v.first_name || v.last_name)) {
+    const parts = vault?.settings?.nameOrder === 'last-first' ? [v.last_name, v.first_name] : [v.first_name, v.last_name];
+    v.full_name = parts.filter(Boolean).join(' ');
+  }
+  // Pieces of dates: "ziua __ luna __ anul __"
+  const bd = parseDate(v.birth_date);
+  if (bd) {
+    v.birth_day = String(bd.d).padStart(2, '0'); v.birth_month = String(bd.m).padStart(2, '0'); v.birth_year = String(bd.y);
+    const now = new Date();
+    let age = now.getFullYear() - bd.y;
+    if (now.getMonth() + 1 < bd.m || (now.getMonth() + 1 === bd.m && now.getDate() < bd.d)) age--;
+    if (age >= 0 && age < 130) v.age = String(age);
+  }
+  const t = new Date();
+  v.today_day = String(t.getDate()).padStart(2, '0'); v.today_month = String(t.getMonth() + 1).padStart(2, '0'); v.today_year = String(t.getFullYear());
   if (!v.address) {
     const parts = [];
     if (v.street) parts.push(/^(str|bd|b-dul|sos|calea|aleea|splaiul)\b/i.test(v.street) ? v.street : 'Str. ' + v.street);
@@ -180,6 +216,24 @@ function computeValues(vault) {
   if (vault?.signature) v.signature = '✍︎ (your signature)';
   for (const k of Object.keys(v)) if (!v[k]) delete v[k];
   return v;
+}
+
+// "03.02.2001", "3/2/2001", "2001-02-03", "3 februarie 2001" -> {d, m, y}
+const MONTHS = ['ian', 'feb', 'mar', 'apr', 'mai', 'iun', 'iul', 'aug', 'sep', 'oct', 'noi', 'dec'];
+const MONTHS_EN = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function parseDate(s) {
+  if (!s) return null;
+  let m = /^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/.exec(s.trim());
+  if (m) return { y: +m[1], m: +m[2], d: +m[3] };
+  m = /^(\d{1,2})[-./ ](\d{1,2})[-./ ](\d{4})$/.exec(s.trim());
+  if (m) return { d: +m[1], m: +m[2], y: +m[3] };
+  m = /^(\d{1,2})\s+([a-zăâîșț]+)\.?\s+(\d{4})$/i.exec(s.trim());
+  if (m) {
+    const w = norm(m[2]).slice(0, 3);
+    const i = MONTHS.indexOf(w) >= 0 ? MONTHS.indexOf(w) : MONTHS_EN.indexOf(w);
+    if (i >= 0) return { d: +m[1], m: i + 1, y: +m[3] };
+  }
+  return null;
 }
 
 // All choices for the "fill with" dropdowns

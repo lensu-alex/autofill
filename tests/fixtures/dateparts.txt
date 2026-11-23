@@ -1,0 +1,3 @@
+Numele și prenumele (cu majuscule): ______________________
+Născut(ă) în ziua ____ luna ____ anul ______, în vârstă de ____ ani
+Data: ziua ____ luna ____ anul ______

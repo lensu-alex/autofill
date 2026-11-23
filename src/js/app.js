@@ -208,7 +208,7 @@ const App = {
       el.value = String(s[prop]);
       el.onchange = () => { s[prop] = conv(el.value); this.markDirty(); this.saveVault(); if (this.editor) this.editor.drawAll(); };
     };
-    sel('#set-date', 'dateFormat'); sel('#set-lock', 'autoLock', Number); sel('#set-ink', 'ink');
+    sel('#set-date', 'dateFormat'); sel('#set-name', 'nameOrder'); sel('#set-lock', 'autoLock', Number); sel('#set-ink', 'ink');
     $('#set-smart').checked = s.smart !== false;
     $('#set-smart').onchange = (e) => { s.smart = e.target.checked; this.markDirty(); this.saveVault(); };
     Smart.present().then((ok) => { $('#smart-status').textContent = ok ? '✓ Add-on found.' : 'Add-on not found next to this page (optional).'; });
@@ -337,6 +337,8 @@ const App = {
       v = v.replace(/^(str(ada)?|bd|b-dul|bulevardul|sos(eaua)?|calea|aleea)\.?\s+/i, '');
     }
     if (!v) return null;
+    // "(cu majuscule)", "in capital letters"
+    if (/majuscul|litere mari|litere de tipar|capital letters|block letters|in capitals/i.test((b.before || '') + ' ' + (b.labelText || '') + ' ' + (b.after || ''))) v = v.toLocaleUpperCase('ro');
     if (b.kind === 'field' && (b.fieldType !== 'text' || b.charIndex != null) && b.fieldType !== 'sig') return fieldValue(b, v);
     return { text: v };
   },
