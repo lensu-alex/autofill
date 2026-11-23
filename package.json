@@ -1,10 +1,11 @@
 {
   "name": "autofill",
   "version": "1.0.0",
-  "description": "",
+  "description": "Offline form filler with an encrypted personal vault",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.mjs",
+    "test": "node tests/e2e.mjs chromium && node tests/editor.mjs && node tests/vault.mjs"
   },
   "keywords": [],
   "author": "",

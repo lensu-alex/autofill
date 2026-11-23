@@ -82,6 +82,50 @@ function fontWidths(pg, fontName, cache) {
   return map;
 }
 
+// Horizontal lines drawn on the page (blanks made with lines instead of "____")
+function drawnLines(opl) {
+  const O = pdfjsLib.OPS, out = [];
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const stack = [];
+  const mul = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+  const ap = (x, y) => [x * ctm[0] + y * ctm[2] + ctm[4], x * ctm[1] + y * ctm[3] + ctm[5]];
+  const seg = (a, b) => {
+    const [x0, y0] = ap(...a), [x1, y1] = ap(...b);
+    if (Math.abs(y0 - y1) < 0.8 && Math.abs(x1 - x0) > 25) out.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), y: (y0 + y1) / 2 });
+  };
+  for (let i = 0; i < opl.fnArray.length; i++) {
+    const fn = opl.fnArray[i], args = opl.argsArray[i];
+    if (fn === O.save) stack.push(ctm);
+    else if (fn === O.restore) ctm = stack.pop() || ctm;
+    else if (fn === O.transform) ctm = mul(ctm, args);
+    else if (fn === O.paintFormXObjectBegin) { stack.push(ctm); if (args[0]) ctm = mul(ctm, args[0]); }
+    else if (fn === O.paintFormXObjectEnd) ctm = stack.pop() || ctm;
+    else if (fn === O.constructPath) {
+      const [ops, c] = args;
+      let j = 0, cur = null;
+      for (const op of ops) {
+        if (op === O.moveTo) { cur = [c[j], c[j + 1]]; j += 2; }
+        else if (op === O.lineTo) { const p = [c[j], c[j + 1]]; j += 2; if (cur) seg(cur, p); cur = p; }
+        else if (op === O.rectangle) {
+          const [x, y, w, hh] = c.slice(j, j + 4); j += 4;
+          const [ax, ay] = ap(x, y), [bx, by] = ap(x + w, y + hh);
+          if (Math.abs(by - ay) < 2 && Math.abs(bx - ax) > 25) out.push({ x0: Math.min(ax, bx), x1: Math.max(ax, bx), y: (ay + by) / 2 });
+        }
+        else if (op === O.curveTo) j += 6;
+        else if (op === O.curveTo2 || op === O.curveTo3) j += 4;
+      }
+    }
+  }
+  // merge pieces of the same line (table grids draw them cell by cell)
+  out.sort((a, b) => a.y - b.y || a.x0 - b.x0);
+  const merged = [];
+  for (const l of out) {
+    const m = merged.find((x) => Math.abs(x.y - l.y) < 0.6 && l.x0 <= x.x1 + 1 && l.x1 >= x.x0 - 1);
+    if (m) { m.x0 = Math.min(m.x0, l.x0); m.x1 = Math.max(m.x1, l.x1); } else merged.push({ ...l });
+  }
+  return merged;
+}
+
 function horizontal(t) { return Math.abs(t[1]) < 0.01 && Math.abs(t[2]) < 0.01; }
 
 function buildLines(items) {
@@ -128,12 +172,15 @@ async function processPdf(bytes, env, meta = {}) {
   for (let i = 0; i < js.numPages; i++) {
     const pg = await js.getPage(i + 1);
     const tc = await pg.getTextContent();
-    try { await pg.getOperatorList(); } catch { /* only needed for exact letter widths */ }
+    let opl = null;
+    try { opl = await pg.getOperatorList(); } catch { /* only needed for letter widths and drawn lines */ }
     const wcache = new Map();
     const items = tc.items
       .filter((it) => it.str && horizontal(it.transform))
       .map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width, size: Math.abs(it.transform[3]) || it.height || 10, family: tc.styles[it.fontName]?.fontFamily, widths: fontWidths(pg, it.fontName, wcache) }));
-    pages.push({ pg, view: pg.view, items, lines: buildLines(items) });
+    let rules = [];
+    try { rules = opl ? drawnLines(opl) : []; } catch { rules = []; }
+    pages.push({ pg, view: pg.view, items, lines: buildLines(items), rules });
   }
   const allText = pages.map((p) => p.items.map((i) => i.str).join(' ')).join(' ');
   const opts = { docHasPrenume: /prenume/.test(norm(allText)) };
@@ -212,6 +259,38 @@ async function processPdf(bytes, env, meta = {}) {
         blanks.push(it);
       }
     });
+  });
+
+  // 3) Drawn lines with a label: "Nume" followed by a line, or a line with "(semnătura)" under it
+  pages.forEach((P, pi) => {
+    for (const r of P.rules) {
+      if (r.x1 - r.x0 > (P.view[2] - P.view[0]) * 0.8) continue; // page-wide rules are decoration
+      const taken = blanks.some((b) => b.page === pi && b.kind !== 'field' && Math.abs(b.y - r.y) < 14 && b.x >= r.x0 - 40 && b.x <= r.x1);
+      if (taken || inWidget(pi, r.x0, r.y, r.x1, r.y + 10)) continue;
+      const filled = P.items.some((it) => it.x < r.x1 - 2 && it.x + it.w > r.x0 + 2 && it.y >= r.y - 1 && it.y - r.y < 12 && it.str.trim());
+      if (filled) continue;
+      let key = null, label = '', size = 10, place = 'on';
+      const l = P.lines.find((l) => l.y >= r.y - 1 && l.y - r.y < 14 && l.x0 < r.x0);
+      if (l) {
+        let k = 0;
+        while (k < l.chars.length && l.chars[k].x1 <= r.x0 + 2) k++;
+        label = l.str.slice(0, k);
+        const gap = k ? r.x0 - l.chars[k - 1].x1 : 1e9;
+        const tail = label.split(/\t|_{3,}|\.{4,}/).pop();
+        if (gap < 150 && tail.trim()) { key = classify(tail, env.compiled, { ...opts, window: label }); size = l.size; }
+      }
+      if (!key) {
+        const below = P.lines.find((l) => r.y - l.y > 0 && r.y - l.y < 16 && l.x0 >= r.x0 - 10 && l.x0 < r.x1);
+        const m = below && /^\s*\(([^)]{2,50})\)/.exec(below.str);
+        if (m) { key = classify(m[1], env.compiled, { ...opts, maxTail: 30 }); label = '(' + m[1] + ')'; size = below.size; place = 'over'; }
+      }
+      if (!key) continue;
+      size = clamp(size, 7, 12);
+      const it = { kind: 'text', page: pi, key, x: r.x0 + 2, y: r.y + 2, size, maxW: r.x1 - r.x0 - 4, cover: null,
+        before: label.replace(/\s+/g, ' ').trim().slice(-48), after: place === 'over' ? '(line)' : '', where: 'page ' + (pi + 1), canImage: true };
+      if (key === 'signature') { it.kind = 'image'; it.h = clamp(size * 2.8, 22, 44); it.w = Math.min(it.h * sig.w / sig.h, r.x1 - r.x0); it.h = it.w * sig.h / sig.w; it.y = r.y - 2; }
+      blanks.push(it);
+    }
   });
 
   function sigPlacement(it, l, b) {

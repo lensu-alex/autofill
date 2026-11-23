@@ -43,3 +43,19 @@ const out = (n) => new URL('./fixtures/' + n, import.meta.url);
   writeFileSync(out('flat.pdf'), await doc.save());
 }
 console.log('pdfs written');
+
+{ // blanks drawn as lines, and a signature line with the caption under it
+  const doc = await PDFDocument.create(); doc.registerFontkit(fontkit);
+  const f = await doc.embedFont(font, { subset: true });
+  const page = doc.addPage([595, 842]);
+  const t = (s, x, y, size = 11) => page.drawText(s, { x, y, size, font: f });
+  const line = (x0, x1, y) => page.drawLine({ start: { x: x0, y }, end: { x: x1, y }, thickness: 0.7 });
+  t('Cerere de înscriere', 50, 780, 16);
+  t('Nume și prenume', 50, 720); line(160, 450, 718);
+  t('Data nașterii', 50, 690); line(160, 300, 688);
+  t('E-mail', 50, 660); line(160, 450, 658);
+  t('Observații', 50, 630); line(160, 450, 628);
+  line(350, 520, 540); t('(semnătura)', 405, 528, 9);
+  line(20, 575, 500); // page-wide decoration
+  writeFileSync(out('lines.pdf'), await doc.save());
+}

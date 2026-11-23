@@ -58,12 +58,13 @@ function paragraphBlanks(paras, segsOf, env, opts, where, insertImage, skipInser
 
 /* ---------------- Word .docx ---------------- */
 
-function wSegs(p) {
+function wSegs(p, skip) {
   const W = NS.w, segs = [];
   let pos = 0;
   const walk = (n) => {
     for (const c of n.childNodes) {
       if (c.nodeType !== 1) continue;
+      if (skip && skip.has(c)) { segs.push({ start: pos, end: pos + 1, el: null, text: '\uFFFC' }); pos++; continue; } // a form control
       const ln = c.localName;
       if (c.namespaceURI === W) {
         if (ln === 't') {
@@ -123,6 +124,82 @@ function wDrawingRun(doc, rid, img) {
   const id = ++docPrId;
   const xml = `<w:r xmlns:w="${NS.w}"><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="Signature ${id}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${NS.a}" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="${NS.a}"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${id}" name="signature.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
   return doc.importNode(parseXml(xml).documentElement, true);
+}
+
+function wVal(el, name) {
+  const e = el && el.getElementsByTagNameNS(NS.w, name)[0];
+  return e ? e.getAttributeNS(NS.w, 'val') || e.getAttribute('w:val') || '' : '';
+}
+
+// Text of the paragraph before node (the label of a control)
+function wTextBefore(node) {
+  const p = closestNS(node, NS.w, 'p');
+  if (!p) return '';
+  let out = '';
+  for (const t of p.getElementsByTagNameNS(NS.w, 't')) {
+    if (node.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_PRECEDING && !node.contains(t)) out += t.textContent;
+  }
+  return out;
+}
+
+function wordControls(doc, env, opts, where, imageAt, skip) {
+  const out = [];
+  // Content controls
+  for (const sdt of [...doc.getElementsByTagNameNS(NS.w, 'sdt')]) {
+    const pr = kids(sdt, NS.w, 'sdtPr')[0];
+    const content = kids(sdt, NS.w, 'sdtContent')[0];
+    if (!pr || !content) continue;
+    if (['docPartObj', 'picture', 'checkbox', 'group', 'dropDownList', 'comboBox'].some((n) => pr.getElementsByTagNameNS('*', n).length)) continue;
+    if (content.getElementsByTagNameNS(NS.w, 'tbl').length || content.getElementsByTagNameNS(NS.w, 'p').length > 1) continue;
+    const ts = [...content.getElementsByTagNameNS(NS.w, 't')];
+    const placeholder = pr.getElementsByTagNameNS(NS.w, 'showingPlcHdr').length > 0;
+    if (!placeholder && ts.map((t) => t.textContent).join('').trim()) continue;
+    const name = wVal(pr, 'alias') || wVal(pr, 'tag');
+    const before = wTextBefore(sdt);
+    const key = (name && classify(name, env.compiled, { ...opts, maxTail: 30 })) || classify(before, env.compiled, { ...opts, window: before });
+    skip.add(sdt);
+    out.push({
+      key, before: (name ? '[' + name + '] ' : '') + before.slice(-40), after: '', where: where || 'form control', kind: 'control', canImage: true,
+      apply(val) {
+        for (const e of [...pr.getElementsByTagNameNS(NS.w, 'showingPlcHdr')]) e.parentNode.removeChild(e);
+        for (const rs of [...content.getElementsByTagNameNS(NS.w, 'rStyle')]) if (/placeholder/i.test(rs.getAttributeNS(NS.w, 'val') || '')) rs.parentNode.removeChild(rs);
+        ts.forEach((t, i) => { t.textContent = i === 0 && val.text != null ? val.text : ''; preserve(t); });
+        const inPara = !!closestNS(sdt, NS.w, 'p');
+        const target = inPara ? content : (content.getElementsByTagNameNS(NS.w, 'p')[0] || content.appendChild(doc.createElementNS(NS.w, 'w:p')));
+        if (val.image) imageAt(target, null, val.image);
+        else if (!ts.length) target.appendChild(wMakeRun(doc, val.text, null));
+      },
+    });
+  }
+  // Legacy text form fields: fldChar begin (with ffData/textInput) … separate … result … end
+  for (const fc of [...doc.getElementsByTagNameNS(NS.w, 'fldChar')]) {
+    if (fc.getAttributeNS(NS.w, 'fldCharType') !== 'begin') continue;
+    const ff = kids(fc, NS.w, 'ffData')[0];
+    if (!ff || !ff.getElementsByTagNameNS(NS.w, 'textInput').length) continue;
+    const beginRun = fc.parentNode;
+    const result = [];
+    let state = 'instr';
+    for (let r = beginRun.nextSibling; r; r = r.nextSibling) {
+      if (r.nodeType !== 1) continue;
+      const f = r.getElementsByTagNameNS(NS.w, 'fldChar')[0];
+      const type = f && f.getAttributeNS(NS.w, 'fldCharType');
+      if (type === 'separate') { state = 'result'; continue; }
+      if (type === 'end') break;
+      if (state === 'result') result.push(...r.getElementsByTagNameNS(NS.w, 't'));
+    }
+    if (!result.length) continue;
+    const current = result.map((t) => t.textContent).join('');
+    if (current.replace(/[\s\u2002\u00a0]/g, '')) continue; // already filled in
+    result.forEach((t) => skip.add(t));
+    const name = wVal(ff, 'name');
+    const before = wTextBefore(beginRun);
+    const key = classify(before, env.compiled, { ...opts, window: before }) || (name && classify(name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\d]+/g, ' '), env.compiled, opts));
+    out.push({
+      key, before: before.slice(-48) || name, after: '', where: where || 'form field', kind: 'control', canImage: false,
+      apply(val) { if (val.text != null) result.forEach((t, i) => { t.textContent = i === 0 ? val.text : ''; preserve(t); }); },
+    });
+  }
+  return out;
 }
 
 async function processDocx(bytes, env) {
@@ -189,8 +266,11 @@ async function processDocx(bytes, env) {
         });
       }
     }
+    // Word form controls: content controls ("Click here to enter text") and old FORMTEXT fields
+    const skip = new Set();
+    blanks.push(...wordControls(doc, env, opts, where, imageAt, skip));
     const paras = [...doc.getElementsByTagNameNS(NS.w, 'p')];
-    blanks.push(...paragraphBlanks(paras, wSegs, env, opts, where, imageAt,
+    blanks.push(...paragraphBlanks(paras, (p) => wSegs(p, skip), env, opts, where, imageAt,
       (p) => { const tc = closestNS(p, NS.w, 'tc'); return tc && labelCells.has(tc); }));
   }
 

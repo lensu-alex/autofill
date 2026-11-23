@@ -68,3 +68,24 @@ with zipfile.ZipFile(os.path.join(D, 'note.pages'), 'w') as z:
     z.writestr('Index/Document.iwa', b'\x00')
     z.writestr('preview.jpg', buf.getvalue())
 print('fixtures written')
+
+# --- Word with content controls and a legacy FORMTEXT field
+from docx.oxml import parse_xml
+W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+d = Document()
+d.add_paragraph('Formular cu controale')
+p = d.add_paragraph('Prenume: ')
+p._p.append(parse_xml(f'<w:sdt {W}><w:sdtPr><w:alias w:val="Prenume"/><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:r><w:rPr><w:rStyle w:val="PlaceholderText"/></w:rPr><w:t>Click or tap here to enter text.</w:t></w:r></w:sdtContent></w:sdt>'))
+p = d.add_paragraph('Telefon: ')
+p._p.append(parse_xml(f'<w:sdt {W}><w:sdtPr><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:r><w:t>Click or tap here to enter text.</w:t></w:r></w:sdtContent></w:sdt>'))
+p = d.add_paragraph('CNP: ')
+for x in [f'<w:r {W}><w:fldChar w:fldCharType="begin"><w:ffData><w:name w:val="Text1"/><w:enabled/><w:textInput/></w:ffData></w:fldChar></w:r>',
+          f'<w:r {W}><w:instrText xml:space="preserve"> FORMTEXT </w:instrText></w:r>',
+          f'<w:r {W}><w:fldChar w:fldCharType="separate"/></w:r>',
+          f'<w:r {W}><w:t xml:space="preserve">     </w:t></w:r>',
+          f'<w:r {W}><w:fldChar w:fldCharType="end"/></w:r>']:
+    p._p.append(parse_xml(x))
+d.add_paragraph('Semnătura:')
+d.paragraphs[-1]._p.append(parse_xml(f'<w:sdt {W}><w:sdtPr><w:alias w:val="Semnătura"/><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:r><w:t>Semnați aici</w:t></w:r></w:sdtContent></w:sdt>'))
+d.save(os.path.join(D, 'controls.docx'))
+print('controls written')
