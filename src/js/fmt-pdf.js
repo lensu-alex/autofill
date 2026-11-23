@@ -175,12 +175,21 @@ async function processPdf(bytes, env, meta = {}) {
     let opl = null;
     try { opl = await pg.getOperatorList(); } catch { /* only needed for letter widths and drawn lines */ }
     const wcache = new Map();
-    const items = tc.items
+    let items = tc.items
       .filter((it) => it.str && horizontal(it.transform))
       .map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5], w: it.width, size: Math.abs(it.transform[3]) || it.height || 10, family: tc.styles[it.fontName]?.fontFamily, widths: fontWidths(pg, it.fontName, wcache) }));
     let rules = [];
     try { rules = opl ? drawnLines(opl) : []; } catch { rules = []; }
-    pages.push({ pg, view: pg.view, items, lines: buildLines(items), rules });
+    let ocr = false;
+    // A page without real text is a picture: read it with OCR
+    if (items.filter((it) => it.str.trim()).length < 3 && env.ocr !== false && typeof ocrAvailable === 'function' && ocrAvailable()) {
+      try {
+        env.progress && env.progress(`Reading page ${i + 1} of ${js.numPages}…`);
+        const r = await ocrPage(pg, (st, p) => env.progress && env.progress(`Reading page ${i + 1} of ${js.numPages}: ${st}${p ? ' ' + Math.round(p * 100) + '%' : ''}`));
+        items = r.items; rules = rules.concat(r.rules); ocr = true;
+      } catch (e) { console.warn('OCR failed', e); }
+    }
+    pages.push({ pg, view: pg.view, items, lines: buildLines(items), rules, ocr });
   }
   const allText = pages.map((p) => p.items.map((i) => i.str).join(' ')).join(' ');
   const opts = { docHasPrenume: /prenume/.test(norm(allText)) };
@@ -267,7 +276,7 @@ async function processPdf(bytes, env, meta = {}) {
       if (r.x1 - r.x0 > (P.view[2] - P.view[0]) * 0.8) continue; // page-wide rules are decoration
       const taken = blanks.some((b) => b.page === pi && b.kind !== 'field' && Math.abs(b.y - r.y) < 14 && b.x >= r.x0 - 40 && b.x <= r.x1);
       if (taken || inWidget(pi, r.x0, r.y, r.x1, r.y + 10)) continue;
-      const filled = P.items.some((it) => it.x < r.x1 - 2 && it.x + it.w > r.x0 + 2 && it.y >= r.y - 1 && it.y - r.y < 12 && it.str.trim());
+      const filled = P.items.some((it) => { const cx = it.x + it.w / 2; return cx > r.x0 + 3 && cx < r.x1 - 3 && it.y >= r.y - 2 && it.y - r.y < 12 && it.str.trim(); });
       if (filled) continue;
       let key = null, label = '', size = 10, place = 'on';
       const l = P.lines.find((l) => l.y >= r.y - 1 && l.y - r.y < 14 && l.x0 < r.x0);
@@ -302,7 +311,8 @@ async function processPdf(bytes, env, meta = {}) {
   }
 
   const scanned = pages.every((p) => p.items.length === 0);
-  return { blanks, js, pages, scanned, meta };
+  const ocrUsed = pages.some((p) => p.ocr);
+  return { blanks, js, pages, scanned, ocrUsed, meta };
 }
 
 // Makes a blank an image (signature) or text, keeping its spot

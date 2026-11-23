@@ -259,7 +259,7 @@ const App = {
   async openDoc(file) {
     const ext = fileExt(file.name);
     if (OLD_FORMATS[ext]) return toast(`Old ${OLD_FORMATS[ext]} format. Open it and "Save As" the new format (.${ext}x), then drop that here.`, 'bad', 7000);
-    const env = { compiled: this.compiled, vault: this.vault };
+    const env = { compiled: this.compiled, vault: this.vault, progress: (m) => { $('#drop-status').textContent = m; } };
     const bytes = new Uint8Array(await file.arrayBuffer());
     $('#drop').classList.add('busy');
     $('#work').removeAttribute('data-ready');
@@ -279,7 +279,8 @@ const App = {
         }
         const res = await processPdf(pdfBytes, env);
         sess = { type: 'pdf', name: file.name, bytes: pdfBytes, px, ...res };
-        if (res.scanned) notice = (notice ? notice + ' ' : '') + 'This is a picture/scan, so the blanks can\'t be read automatically. Click on the page where each thing should go.';
+        if (res.scanned) notice = (notice ? notice + ' ' : '') + 'No text could be read on this picture. Click on the page where each thing should go.';
+        else if (res.ocrUsed) notice = (notice ? notice + ' ' : '') + 'This is a scan/photo: its text was read automatically, so check that everything sits in the right place (drag to adjust, click the page to add more).';
       } else if (OFFICE[ext]) {
         const res = await OFFICE[ext](bytes, env, ext);
         sess = { type: 'office', name: file.name, ext, proc: OFFICE[ext], bytes, blanks: res.blanks };
@@ -307,7 +308,7 @@ const App = {
     } catch (err) {
       console.error(err);
       toast(err.message || String(err), 'bad', 8000);
-    } finally { $('#drop').classList.remove('busy'); }
+    } finally { $('#drop').classList.remove('busy'); $('#drop-status').textContent = ''; }
   },
 
   // What goes into a blank: {text} or {image}

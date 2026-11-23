@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- No network at all: nothing you type or open here can leave this computer -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src data: blob:; worker-src blob:; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src data: blob:; worker-src blob:; form-action 'none'; base-uri 'none'">
 <title>AutoFill — private form filler</title>
 <style>/*CSS*/</style>
 </head>
@@ -52,6 +52,7 @@
         <div class="muted">PDF · Word · Pages · OpenDocument · Excel · PowerPoint · photos/scans · HTML · text</div>
         <button class="primary" id="pick-doc">Choose a file…</button>
         <input type="file" id="doc-file" hidden>
+        <div id="drop-status" class="muted small"></div>
       </div>
       <div id="work" hidden>
         <div class="workbar">

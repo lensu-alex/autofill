@@ -89,3 +89,30 @@ d.add_paragraph('Semnătura:')
 d.paragraphs[-1]._p.append(parse_xml(f'<w:sdt {W}><w:sdtPr><w:alias w:val="Semnătura"/><w:showingPlcHdr/></w:sdtPr><w:sdtContent><w:r><w:t>Semnați aici</w:t></w:r></w:sdtContent></w:sdt>'))
 d.save(os.path.join(D, 'controls.docx'))
 print('controls written')
+
+# --- A realistic scan: 200 dpi, grey paper, noise, slightly tilted, dotted blanks
+import random
+random.seed(1)
+W, H = 1654, 2339
+im = Image.new('L', (W, H), 242)
+g = ImageDraw.Draw(im)
+fT = ImageFont.truetype('/System/Library/Fonts/Supplemental/Times New Roman.ttf', 34)
+fB = ImageFont.truetype('/System/Library/Fonts/Supplemental/Times New Roman Bold.ttf', 40)
+g.text((520, 200), 'DECLARAȚIE', fill=20, font=fB)
+lines = [
+    'Subsemnatul(a) ...................................................................., CNP ........................................,',
+    'domiciliat(ă) în ......................................................., telefon ..........................................',
+    'declar pe propria răspundere că datele de mai sus sunt corecte.',
+]
+y = 400
+for ln in lines:
+    g.text((150, y), ln, fill=25, font=fT); y += 70
+g.text((150, 800), 'Data: ......................', fill=25, font=fT)
+g.text((950, 800), 'Semnătura:', fill=25, font=fT)
+g.line((1130, 835, 1480, 835), fill=30, width=3)
+px = im.load()
+for _ in range(60000):
+    x, yy = random.randrange(W), random.randrange(H); px[x, yy] = max(0, px[x, yy] - random.randrange(40))
+im = im.rotate(0.4, fillcolor=242, resample=Image.BICUBIC)
+im.convert('RGB').save(os.path.join(D, 'scan2.jpg'), quality=70)
+print('scan2 written')
