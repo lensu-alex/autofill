@@ -259,7 +259,7 @@ const App = {
   async openDoc(file) {
     const ext = fileExt(file.name);
     if (OLD_FORMATS[ext]) return toast(`Old ${OLD_FORMATS[ext]} format. Open it and "Save As" the new format (.${ext}x), then drop that here.`, 'bad', 7000);
-    const env = { compiled: this.compiled, vault: this.vault, progress: (m) => { $('#drop-status').textContent = m; } };
+    const env = { compiled: this.compiled, vault: this.vault, values: this.values, progress: (m) => { $('#drop-status').textContent = m; } };
     const bytes = new Uint8Array(await file.arrayBuffer());
     $('#drop').classList.add('busy');
     $('#work').removeAttribute('data-ready');
@@ -280,6 +280,7 @@ const App = {
         const res = await processPdf(pdfBytes, env);
         sess = { type: 'pdf', name: file.name, bytes: pdfBytes, px, ...res };
         if (res.scanned) notice = (notice ? notice + ' ' : '') + 'No text could be read on this picture. Click on the page where each thing should go.';
+        else if (res.xfa) notice = (notice ? notice + ' ' : '') + 'This is an Adobe "XFA" form, which only Adobe Reader can fill properly. Your info will be written on top of the page instead; check the result.';
         else if (res.ocrUsed) notice = (notice ? notice + ' ' : '') + 'This is a scan/photo: its text was read automatically, so check that everything sits in the right place (drag to adjust, click the page to add more).';
       } else if (OFFICE[ext]) {
         const res = await OFFICE[ext](bytes, env, ext);
@@ -314,7 +315,8 @@ const App = {
   // What goes into a blank: {text} or {image}
   valueOf(b) {
     if (!b.key) return null;
-    if (b.key === '__text') return b.text ? { text: b.text } : null;
+    if (b.key === '__tick') return { check: true, text: '✓' };
+    if (b.key === '__text') return b.text ? (b.kind === 'field' ? fieldValue(b, b.text) : { text: b.text }) : null;
     if (b.key === 'signature') {
       if (!this.vault.signature) return null;
       const sz = this.vault.sigSize || { w: 300, h: 100 };
@@ -325,7 +327,9 @@ const App = {
     if (v && b.key === 'street' && /\b(str|strada|bd|b-dul|bulevardul|sos|soseaua|calea|aleea|street)\.?\s*:?\s*$/i.test(b.before || '')) {
       v = v.replace(/^(str(ada)?|bd|b-dul|bulevardul|sos(eaua)?|calea|aleea)\.?\s+/i, '');
     }
-    return v ? { text: v } : null;
+    if (!v) return null;
+    if (b.kind === 'field' && (b.fieldType !== 'text' || b.charIndex != null) && b.fieldType !== 'sig') return fieldValue(b, v);
+    return { text: v };
   },
 
   fieldSelect(b, onchange, placeholder) {
@@ -340,6 +344,7 @@ const App = {
       }
       s.append(og);
     }
+    if (b.fieldType === 'check') s.append(h('option', { value: '__tick', text: '☑ Tick this box' }));
     s.append(h('option', { value: '__text', text: b.key === '__text' && b.text ? 'Text: ' + b.text.slice(0, 30) : 'Type something else…' }));
     s.value = b.key || '';
     s.onchange = () => {
@@ -390,11 +395,12 @@ const App = {
     const rows = [...s.blanks].sort((a, b) => (a.page ?? 0) - (b.page ?? 0) || (b.y ?? 0) - (a.y ?? 0) || a.id - b.id);
     for (const b of rows) {
       const val = this.valueOf(b);
-      if (val) filled++; else if (!b.key) unknown++; else missing++;
-      const status = val ? 'ok' : b.key ? 'missing' : 'unknown';
+      if (val || (!val && b.fieldType === 'check' && b.key && this.values[b.key])) filled++; else if (!b.key) unknown++; else missing++;
+      const unticked = !val && b.fieldType === 'check' && b.key && this.values[b.key];
+      const status = val || unticked ? 'ok' : b.key ? 'missing' : 'unknown';
       const tooLong = val?.text && b.kind === 'text' && b.maxW > 10 && textWidth(val.text, b.size * 0.72) > b.maxW * 1.05;
       const preview = val ? (val.image ? h('img', { src: val.image.dataUrl, class: 'sigthumb' }) : h('span', { text: val.text }))
-        : h('span', { class: 'muted', text: b.key ? (b.key === 'signature' ? 'no signature saved' : 'empty in your info') : 'not filled' });
+        : h('span', { class: 'muted', text: unticked ? '☐ stays unticked' : b.key ? (b.key === 'signature' ? 'no signature saved' : 'empty in your info') : 'not filled' });
       const row = h('div', { class: 'row ' + status, 'data-id': b.id },
         h('div', { class: 'ctx' },
           b.where ? h('span', { class: 'where', text: b.where }) : null,

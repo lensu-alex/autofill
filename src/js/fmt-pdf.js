@@ -160,6 +160,38 @@ function splitFieldName(n) {
   return last.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\-\d]+/g, ' ');
 }
 
+// Does a tick-box / list option mean this value? ("M" = "Masculin", "Română" = "romana")
+const GENDER = { m: ['m', 'masculin', 'male', 'man', 'barbat', 'barbatesc', 'b'], f: ['f', 'feminin', 'female', 'woman', 'femeie', 'femeiesc'] };
+function canonGender(s) { for (const [g, list] of Object.entries(GENDER)) if (list.includes(s)) return g; return null; }
+function optionMatches(option, value, key) {
+  const a = norm(option), b = norm(value);
+  if (!a || !b) return false;
+  if (key === 'gender' || canonGender(a) && canonGender(b)) return !!canonGender(a) && canonGender(a) === canonGender(b);
+  return a.length >= 3 && a === b;
+}
+function bestOption(options, value, key) {
+  if (!value) return null;
+  const b = norm(value);
+  return options.find((o) => optionMatches(o, value, key))
+    || options.find((o) => norm(o) === b)
+    || options.find((o) => norm(o).startsWith(b) || (norm(o).length >= 3 && b.startsWith(norm(o))))
+    || null;
+}
+
+// What a form field gets, given the text value of its key
+function fieldValue(b, text) {
+  if (b.fieldType === 'check') return text != null && (b.key === '__tick' || optionMatches(b.option, text, b.key)) ? { check: true, text: '✓' } : null;
+  if (b.fieldType === 'radio' || b.fieldType === 'choice') {
+    const o = bestOption(b.options || [], text, b.key);
+    return o ? { choice: o, text: o } : null;
+  }
+  if (b.charIndex != null) {
+    const ch = String(text).replace(/[\s.\-/]/g, '')[b.charIndex];
+    return ch ? { text: ch } : null;
+  }
+  return { text };
+}
+
 async function processPdf(bytes, env, meta = {}) {
   let lib;
   try { lib = await PDFLib.PDFDocument.load(bytes, { updateMetadata: false }); }
@@ -208,36 +240,84 @@ async function processPdf(bytes, env, meta = {}) {
   };
   let fields = [];
   try { fields = lib.getForm().getFields(); } catch { fields = []; }
+  const values = env.values || {};
   const widgetRects = pages.map(() => []);
+  const near = (page, rect) => {
+    const items = pages[page].items;
+    const sameRow = (it) => it.y < rect.y + rect.height + 2 && it.y + it.size * 0.8 > rect.y - 2;
+    const left = items.filter((it) => sameRow(it) && it.x + it.w <= rect.x + 3 && rect.x - (it.x + it.w) < 220)
+      .sort((a, b) => (b.x + b.w) - (a.x + a.w))[0];
+    const right = items.filter((it) => sameRow(it) && it.x >= rect.x + rect.width - 3 && it.x - (rect.x + rect.width) < 90)
+      .sort((a, b) => a.x - b.x)[0];
+    const above = items.filter((it) => it.y >= rect.y + rect.height - 2 && it.y - (rect.y + rect.height) < 2.5 * it.size && it.x < rect.x + rect.width && it.x + it.w > rect.x)
+      .sort((a, b) => a.y - b.y)[0];
+    return { left, right, above };
+  };
+  const cls = (t) => t && classify(t, env.compiled, { ...opts, maxTail: 20 });
   for (const f of fields) {
-    const isText = f instanceof PDFLib.PDFTextField, isSig = f instanceof PDFLib.PDFSignature;
-    if (!isText && !isSig) continue;
+    const type = f instanceof PDFLib.PDFTextField ? 'text' : f instanceof PDFLib.PDFSignature ? 'sig'
+      : f instanceof PDFLib.PDFCheckBox ? 'check' : f instanceof PDFLib.PDFRadioGroup ? 'radio'
+      : (f instanceof PDFLib.PDFDropdown || f instanceof PDFLib.PDFOptionList) ? 'choice' : null;
+    if (!type) continue;
     const ws = f.acroField.getWidgets();
     if (!ws.length) continue;
     ws.forEach((w) => { const r = w.getRectangle(); widgetRects[findPage(w)].push(r); });
+    let readOnly = false;
+    try { readOnly = f.isReadOnly(); } catch { readOnly = false; }
+    if (readOnly) continue;
     const w = ws[0], rect = w.getRectangle(), page = findPage(w);
-    // The printed label left of (or above) the box
-    const items = pages[page].items;
-    const left = items.filter((it) => it.x + it.w <= rect.x + 3 && rect.x - (it.x + it.w) < 220 && it.y < rect.y + rect.height && it.y + it.size * 0.8 > rect.y)
-      .sort((a, b) => (b.x + b.w) - (a.x + a.w))[0];
-    const above = items.filter((it) => it.y >= rect.y + rect.height - 2 && it.y - (rect.y + rect.height) < 2.5 * it.size && it.x < rect.x + rect.width && it.x + it.w > rect.x)
-      .sort((a, b) => a.y - b.y)[0];
+    const { left, right, above } = near(page, rect);
     const name = splitFieldName(f.getName());
-    let key = isSig ? 'signature' : (classify(name, env.compiled, { ...opts, maxTail: 20 })
-      || (left && classify(left.str, env.compiled, { ...opts, maxTail: 20 }))
-      || (above && classify(above.str, env.compiled, { ...opts, maxTail: 20 })));
+    const base = {
+      kind: 'field', fieldType: type, fieldName: f.getName(), sigField: type === 'sig', page,
+      rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height }, where: 'page ' + (page + 1) + ' · field', after: '',
+    };
+    if (type === 'check') {
+      // "☐ Masculin ☐ Feminin": the word next to the box says what ticking it means
+      const option = (right?.str || left?.str || name || '').trim();
+      let key = canonGender(norm(option)) ? 'gender' : null;
+      if (!key) for (const [k, v] of Object.entries(values)) if (optionMatches(option, v, k)) { key = k; break; }
+      let checked = false;
+      try { checked = f.isChecked(); } catch { checked = false; }
+      blanks.push({ ...base, option, key: checked ? null : key, before: '☐ ' + option.slice(0, 40), canImage: false });
+      continue;
+    }
+    if (type === 'radio' || type === 'choice') {
+      let options = [];
+      try { options = f.getOptions(); } catch { options = []; }
+      const key = cls(name) || cls(left?.str) || cls(above?.str);
+      const optRects = type === 'radio' ? ws.map((x) => { const r = x.getRectangle(); return { x: r.x, y: r.y, w: r.width, h: r.height, page: findPage(x) }; }) : null;
+      blanks.push({ ...base, options, optRects, key, before: (left?.str || above?.str || name).trim().slice(-40) + ' (' + options.slice(0, 4).join(' / ') + ')', canImage: false });
+      continue;
+    }
+    let key = type === 'sig' ? 'signature' : (cls(name) || cls(left?.str) || cls(above?.str));
     let existing = '';
-    if (isText) { try { existing = f.getText() || ''; } catch { existing = ''; } }
+    if (type === 'text') { try { existing = f.getText() || ''; } catch { existing = ''; } }
     if (existing.trim()) key = null;
-    if (f.isReadOnly()) continue;
     blanks.push({
-      kind: 'field', fieldName: f.getName(), sigField: isSig, page,
-      rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
-      maxLen: isText ? f.getMaxLength() : undefined,
+      ...base, maxLen: type === 'text' ? f.getMaxLength() : undefined,
       key, before: (left?.str || above?.str || name).trim().slice(-48), after: existing ? `(already: ${existing.slice(0, 20)})` : '',
-      where: 'page ' + (page + 1) + ' · field', canImage: isSig || true,
+      canImage: true,
     });
   }
+  // A row of one-letter boxes (CNP in 13 boxes, a date in 8): each box gets one character
+  const singles = blanks.filter((b) => b.fieldType === 'text' && b.maxLen && b.maxLen <= 2)
+    .sort((a, b) => a.page - b.page || b.rect.y - a.rect.y || a.rect.x - b.rect.x);
+  let run = [];
+  const flush = () => {
+    if (run.length >= 3) {
+      const key = run.find((b) => b.key)?.key;
+      const label = run[0].before || '';
+      run.forEach((b, i) => { b.key = key || null; b.charIndex = i; b.before = label + ` [box ${i + 1}/${run.length}]`; });
+    }
+    run = [];
+  };
+  for (const b of singles) {
+    const prev = run[run.length - 1];
+    if (prev && prev.page === b.page && Math.abs(prev.rect.y - b.rect.y) < 3 && b.rect.x - (prev.rect.x + prev.rect.w) < prev.rect.w * 1.5) run.push(b);
+    else { flush(); run.push(b); }
+  }
+  flush();
 
   // 2) Printed blanks: "Nume: ________", "Subsemnatul ………", "Semnătura:"
   const inWidget = (p, x0, y0, x1, y1) => widgetRects[p].some((r) => x0 < r.x + r.width + 4 && x1 > r.x - 4 && y0 < r.y + r.height + 2 && y1 > r.y - 2);
@@ -312,7 +392,9 @@ async function processPdf(bytes, env, meta = {}) {
 
   const scanned = pages.every((p) => p.items.length === 0);
   const ocrUsed = pages.some((p) => p.ocr);
-  return { blanks, js, pages, scanned, ocrUsed, meta };
+  let xfa = false;
+  try { const af = lib.catalog.lookup(PDFLib.PDFName.of('AcroForm')); xfa = !!(af && af.lookup(PDFLib.PDFName.of('XFA'))) && !fields.length; } catch { xfa = false; }
+  return { blanks, js, pages, scanned, ocrUsed, xfa, meta };
 }
 
 // Makes a blank an image (signature) or text, keeping its spot
@@ -364,6 +446,16 @@ async function buildPdf(sess, valueOf, opts) {
         page.drawText(val.text, { x: r.x + 2, y: r.y + r.h * 0.3, size: Math.min(11, r.h * 0.6), font, color: ink });
         continue;
       }
+      try {
+        if (val.check) { form.getCheckBox(b.fieldName).check(); continue; }
+        if (val.choice != null) {
+          const f = form.getField(b.fieldName);
+          f.select(val.choice);
+          formTouched = true;
+          continue;
+        }
+      } catch (e) { console.warn('could not set', b.fieldName, e); continue; }
+      if (b.fieldType !== 'text') continue;
       const f = form.getTextField(b.fieldName);
       let t = val.text;
       if (b.maxLen && t.length > b.maxLen) t = t.slice(0, b.maxLen);
@@ -379,6 +471,7 @@ async function buildPdf(sess, valueOf, opts) {
     if (b.cover && opts.cover) page.drawRectangle({ x: b.cover.x, y: b.cover.y, width: b.cover.w, height: b.cover.h, color: PDFLib.rgb(1, 1, 1) });
     page.drawText(val.text, { x: b.x, y: b.y, size: fitSize(b, val.text), font, color: ink });
   }
+  if (form) { try { form.deleteXFA(); } catch { /* not an XFA form */ } } // so every viewer shows the normal fields
   if (formTouched) form.updateFieldAppearances(font);
   return doc.save({ updateFieldAppearances: false });
 }
@@ -446,8 +539,9 @@ class PdfEditor {
       el = h('div', { class: 'ov field' + (b.key ? '' : ' unknown') });
       Object.assign(el.style, { left: x0 + 'px', top: y0 + 'px', width: b.rect.w * s + 'px', height: b.rect.h * s + 'px' });
       if (val?.image) el.append(h('img', { src: val.image.dataUrl, draggable: false }));
-      else el.append(h('span', { text: val ? val.text : b.key ? '⚠ ' + fieldLabel(b.key, this.app.vault) : '' }));
-      el.firstChild.style.fontSize = Math.min(11, b.rect.h * 0.7) * s + 'px';
+      else el.append(h('span', { text: val ? val.text : b.key && b.fieldType === 'text' ? '⚠ ' + fieldLabel(b.key, this.app.vault) : '' }));
+      el.firstChild.style.fontSize = Math.min(11, b.rect.h * 0.8) * s + 'px';
+      if (b.fieldType === 'check') el.classList.add('check');
     } else if (!b.key) {
       const [x, y] = pt(b.x, b.y);
       el = h('div', { class: 'ov unknown dot', title: 'Unknown blank: click to choose what goes here', text: '?' });

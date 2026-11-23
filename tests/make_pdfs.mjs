@@ -59,3 +59,27 @@ console.log('pdfs written');
   line(20, 575, 500); // page-wide decoration
   writeFileSync(out('lines.pdf'), await doc.save());
 }
+
+{ // tick boxes, radio buttons, a dropdown, CNP in 13 one-letter boxes
+  const doc = await PDFDocument.create(); doc.registerFontkit(fontkit);
+  const f = await doc.embedFont(font, { subset: true });
+  const page = doc.addPage([595, 842]);
+  const form = doc.getForm();
+  const t = (s, x, y, size = 11) => page.drawText(s, { x, y, size, font: f });
+  t('Fișă de înscriere', 50, 780, 16);
+  t('Sex:', 50, 720);
+  const m = form.createCheckBox('cb1'); m.addToPage(page, { x: 100, y: 717, width: 12, height: 12 }); t('M', 116, 720);
+  const fe = form.createCheckBox('cb2'); fe.addToPage(page, { x: 150, y: 717, width: 12, height: 12 }); t('F', 166, 720);
+  t('Județul:', 50, 680);
+  const dd = form.createDropdown('judet'); dd.addOptions(['Alba', 'Brașov', 'București', 'Cluj', 'Iași']); dd.addToPage(page, { x: 120, y: 675, width: 150, height: 18 });
+  t('CNP:', 50, 640);
+  for (let i = 0; i < 13; i++) { const c = form.createTextField('c' + i); c.setMaxLength(1); c.addToPage(page, { x: 100 + i * 18, y: 636, width: 16, height: 18 }); }
+  t('Cetățenie:', 50, 600);
+  const rg = form.createRadioGroup('cetatenie');
+  rg.addOptionToPage('Română', page, { x: 130, y: 597, width: 12, height: 12 }); t('Română', 146, 600);
+  rg.addOptionToPage('Alta', page, { x: 210, y: 597, width: 12, height: 12 }); t('Alta', 226, 600);
+  t('Sunt de acord cu prelucrarea datelor', 70, 560);
+  const ok = form.createCheckBox('acord'); ok.addToPage(page, { x: 50, y: 557, width: 12, height: 12 });
+  form.updateFieldAppearances(f);
+  writeFileSync(out('choices.pdf'), await doc.save());
+}

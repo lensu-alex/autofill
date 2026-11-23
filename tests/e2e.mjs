@@ -29,6 +29,7 @@ const info = {
   street: 'Str. Florilor', street_number: '12', city: 'București', sector: '3', phone: '0722 123 456',
   email: 'ionut@example.ro', id_series: 'RT', id_number: '123456', id_issued_by: 'SPCLEP Sector 3',
   iban: 'RO49AAAA1B31007593840000', school: 'Universitatea din București',
+  gender: 'M', county: 'Brașov', citizenship: 'română',
 };
 for (const [k, v] of Object.entries(info)) await page.fill(`[data-key="${k}"]`, v);
 // Draw a signature
