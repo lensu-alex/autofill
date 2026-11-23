@@ -37,9 +37,9 @@ function paragraphBlanks(paras, segsOf, env, opts, where, insertImage, skipInser
     for (const b of findBlanks(text, { prevText: texts[i - 1] || '', nextText: texts[i + 1] || '' })) {
       if (b.kind === 'insert' && skipInsert && skipInsert(p)) continue;
       const key = assignBlank(b, env.compiled, opts);
-      if (b.kind === 'insert' && !key) continue; // "Note:" etc. — not a blank
+      const optional = b.kind === 'insert' && !key; // "Note:" etc. — hidden unless smart matching knows it
       out.push({
-        key, ...contextSnippet(b), where, kind: b.kind, canImage: !!insertImage,
+        key, optional, ...contextSnippet(b), where, kind: b.kind, canImage: !!insertImage,
         apply(val) {
           if (val.image) {
             if (!insertImage) return;

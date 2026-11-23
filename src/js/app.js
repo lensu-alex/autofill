@@ -208,6 +208,9 @@ const App = {
       el.onchange = () => { s[prop] = conv(el.value); this.markDirty(); this.saveVault(); if (this.editor) this.editor.drawAll(); };
     };
     sel('#set-date', 'dateFormat'); sel('#set-lock', 'autoLock', Number); sel('#set-ink', 'ink');
+    $('#set-smart').checked = s.smart !== false;
+    $('#set-smart').onchange = (e) => { s.smart = e.target.checked; this.markDirty(); this.saveVault(); };
+    Smart.present().then((ok) => { $('#smart-status').textContent = ok ? '✓ Add-on found.' : 'Add-on not found next to this page (optional).'; });
     $('#set-remember').checked = s.remember;
     $('#set-remember').onchange = async (e) => {
       s.remember = e.target.checked;
@@ -289,6 +292,10 @@ const App = {
         throw new Error(`Can't fill .${ext || '?'} files yet. Supported: PDF, Word, Pages, OpenDocument, Excel, PowerPoint, pictures, HTML and text.`);
       }
       refineKeys(sess.blanks);
+      if (this.settings().smart !== false) {
+        const n = await Smart.pass(sess.blanks, this.vault, env.progress);
+        if (n && sess.type === 'pdf') sess.blanks.forEach((b) => { if (b.smart && b.key === 'signature') setBlankKind(b, 'signature', this.vault); });
+      }
       sess.blanks.forEach((b, i) => { b.id = i; });
       this.sess = sess;
       $('#drop').hidden = true; $('#work').hidden = false;
@@ -408,7 +415,7 @@ const App = {
     const list = $('#blank-list');
     list.textContent = '';
     let filled = 0, unknown = 0, missing = 0;
-    const rows = [...s.blanks].sort((a, b) => (a.page ?? 0) - (b.page ?? 0) || (b.y ?? 0) - (a.y ?? 0) || a.id - b.id);
+    const rows = s.blanks.filter((b) => !(b.optional && !b.key)).sort((a, b) => (a.page ?? 0) - (b.page ?? 0) || (b.y ?? 0) - (a.y ?? 0) || a.id - b.id);
     for (const b of rows) {
       const val = this.valueOf(b);
       if (val || (!val && b.fieldType === 'check' && b.key && this.values[b.key])) filled++; else if (!b.key) unknown++; else missing++;
@@ -427,7 +434,7 @@ const App = {
       if (this.editor) row.addEventListener('click', (e) => { if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'OPTION') this.editor.select(b, true); });
       list.append(row);
     }
-    $('#doc-summary').textContent = `${s.blanks.length} blank${s.blanks.length === 1 ? '' : 's'} · ${filled} filled` +
+    $('#doc-summary').textContent = `${rows.length} blank${rows.length === 1 ? '' : 's'} · ${filled} filled` +
       (missing ? ` · ${missing} missing from your info` : '') + (unknown ? ` · ${unknown} to choose` : '');
   },
 

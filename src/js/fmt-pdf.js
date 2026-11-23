@@ -327,7 +327,7 @@ async function processPdf(bytes, env, meta = {}) {
       const found = findBlanks(l.str, { prevText: P.lines[li - 1]?.str || '', nextText: P.lines[li + 1]?.str || '' });
       for (const b of found) {
         const key = assignBlank(b, env.compiled, opts);
-        if (b.kind === 'insert' && !key) continue;
+        const optional = b.kind === 'insert' && !key;
         const size = clamp(l.size, 7, 12);
         let x, maxW, cover = null;
         if (b.kind === 'insert') {
@@ -342,7 +342,7 @@ async function processPdf(bytes, env, meta = {}) {
           cover = { x: x0 - 0.5, y: l.y - 0.32 * l.size, w: x1 - x0 + 1, h: l.size * 1.15 };
         }
         if (inWidget(pi, x, l.y - 2, x + Math.max(20, Math.min(maxW, 160)), l.y + size)) continue;
-        const it = { kind: 'text', page: pi, key, x, y: l.y + (cover ? 0 : 0.1 * size), size, maxW, cover,
+        const it = { kind: 'text', optional, page: pi, key, x, y: l.y + (cover ? 0 : 0.1 * size), size, maxW, cover,
           ...contextSnippet(b), where: 'page ' + (pi + 1), canImage: true };
         if (key === 'signature') sigPlacement(it, l, b);
         blanks.push(it);
@@ -529,7 +529,7 @@ class PdfEditor {
     if (old) old.remove();
     old?._cover?.remove();
     const P = this.sess.pages[b.page];
-    if (!P || !P.vp) return;
+    if (!P || !P.vp || (b.optional && !b.key)) return;
     const s = P.scale;
     const val = this.app.valueOf(b);
     const pt = (x, y) => P.vp.convertToViewportPoint(x, y);

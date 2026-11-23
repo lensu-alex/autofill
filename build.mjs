@@ -24,7 +24,7 @@ const ocrData = {
   'ocr-eng': bin('@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz'),
 };
 const font = readFileSync(new URL('./node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf', import.meta.url)).toString('base64');
-const app = ['util', 'fields', 'similarity', 'engine', 'fmt-office', 'fmt-text', 'fmt-pdf', 'ocr', 'vault', 'app'].map((f) => src(`js/${f}.js`));
+const app = ['util', 'fields', 'similarity', 'engine', 'fmt-office', 'fmt-text', 'fmt-pdf', 'ocr', 'smart', 'vault', 'app'].map((f) => src(`js/${f}.js`));
 
 const scripts = [
   ...vendor.map((v) => `<script>${safe(v)}</script>`),

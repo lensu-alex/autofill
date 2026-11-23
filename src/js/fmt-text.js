@@ -16,8 +16,8 @@ async function processText(bytes, env, ext) {
   textLines.forEach((line, li) => {
     for (const b of findBlanks(line, { prevText: textLines[li - 1] || '', nextText: textLines[li + 1] || '' })) {
       const key = assignBlank(b, env.compiled, opts);
-      if (b.kind === 'insert' && !key) continue;
-      blanks.push({ key, ...contextSnippet(b), where: 'line ' + (li + 1), kind: b.kind, canImage: false,
+      const optional = b.kind === 'insert' && !key;
+      blanks.push({ key, optional, ...contextSnippet(b), where: 'line ' + (li + 1), kind: b.kind, canImage: false,
         apply(val) {
           if (val.text == null) return;
           const cur = lines[li * 2];
@@ -79,8 +79,8 @@ async function processHtml(bytes, env) {
     const segs = segsOf(nodes);
     for (const b of findBlanks(text, { prevText: texts[i - 1] || '', nextText: texts[i + 1] || '' })) {
       const key = assignBlank(b, env.compiled, opts);
-      if (b.kind === 'insert' && !key) continue;
-      blanks.push({ key, ...contextSnippet(b), where: 'page text', kind: b.kind, canImage: true,
+      const optional = b.kind === 'insert' && !key;
+      blanks.push({ key, optional, ...contextSnippet(b), where: 'page text', kind: b.kind, canImage: true,
         apply(val) {
           if (val.image) {
             const pos = editSegments(segs, b.start, b.end, b.kind === 'insert' ? ' ' : '');

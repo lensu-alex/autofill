@@ -4,7 +4,7 @@
 
 const VAULT_ITER = 600000;
 const LS_KEY = 'autofill.vault.v1';
-const DEFAULT_SETTINGS = { dateFormat: 'dd.mm.yyyy', autoLock: 10, ink: 'black', remember: true };
+const DEFAULT_SETTINGS = { dateFormat: 'dd.mm.yyyy', autoLock: 10, ink: 'black', remember: true, smart: true };
 
 function newVaultData() {
   return { version: 1, values: {}, custom: [], signature: null, sigSize: null, settings: { ...DEFAULT_SETTINGS } };

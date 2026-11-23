@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- No network at all: nothing you type or open here can leave this computer -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src data: blob:; worker-src blob:; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob: file: 'self' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src data: blob:; worker-src blob:; form-action 'none'; base-uri 'none'">
 <title>AutoFill — private form filler</title>
 <style>/*CSS*/</style>
 </head>
@@ -118,6 +118,12 @@
           <select id="set-lock"><option value="5">5 minutes idle</option><option value="10">10 minutes idle</option><option value="30">30 minutes idle</option><option value="0">never</option></select></label>
         <label class="fld"><span>Text colour on PDFs/pictures</span>
           <select id="set-ink"><option value="black">Black</option><option value="blue">Blue (like a pen)</option></select></label>
+      </div>
+      <div class="card">
+        <h3>Smart matching (AI, runs on this computer)</h3>
+        <p class="muted">When a form words something in a way the rules don't know, a small language model guesses what it asks for. It needs the add-on file <b>autofill-smart.js</b> in the same folder as this page. Nothing is sent anywhere.</p>
+        <label class="check"><input type="checkbox" id="set-smart"> Use smart matching when the add-on is there</label>
+        <p class="small muted" id="smart-status"></p>
       </div>
       <div class="card">
         <h3>Change password</h3>

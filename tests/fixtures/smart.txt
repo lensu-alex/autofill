@@ -1,0 +1,7 @@
+Questionnaire
+
+Where do you live? ______________________________
+How can we reach you by phone? ________________
+When were you born? ____________
+What school do you attend? ______________________
+Your favourite colour? ______________
