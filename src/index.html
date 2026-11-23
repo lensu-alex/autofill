@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- No network at all: nothing you type or open here can leave this computer -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src data: blob:; worker-src blob:; form-action 'none'; base-uri 'none'">
+<title>AutoFill — private form filler</title>
+<style>/*CSS*/</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">AutoFill <small>fills any document with your info · works offline</small></div>
+  <div id="top-right"></div>
+</header>
+
+<main>
+  <section id="view-lock">
+    <div class="card narrow" id="unlock-card" hidden>
+      <h2>🔒 Unlock your info</h2>
+      <p class="muted" id="unlock-src"></p>
+      <form id="unlock-form" class="stack">
+        <input type="password" id="unlock-pw" placeholder="Password" autocomplete="current-password">
+        <button class="primary">Unlock</button>
+      </form>
+      <p class="small"><a href="#" id="pick-vault">Open a different .vault file…</a> · <a href="#" id="show-create">Create a new vault</a></p>
+    </div>
+    <div class="card narrow" id="create-card" hidden>
+      <h2>Create your private vault</h2>
+      <p class="muted">Your information and signature are encrypted with your password (AES-256). This page has no internet access, so nothing ever leaves this computer.</p>
+      <form id="create-form" class="stack">
+        <input type="password" id="new-pw" placeholder="Choose a password (8+ characters)" autocomplete="new-password">
+        <input type="password" id="new-pw2" placeholder="Repeat the password" autocomplete="new-password">
+        <label class="check"><input type="checkbox" id="remember" checked> Keep the locked vault in this browser (still needs the password)</label>
+        <button class="primary">Create vault</button>
+      </form>
+      <p class="small">There is no password reset: if you forget it, the vault can't be opened. <a href="#" id="pick-vault2">I already have a .vault file…</a></p>
+    </div>
+    <input type="file" id="vault-file" accept=".vault,.json" hidden>
+  </section>
+
+  <section id="view-app" hidden>
+    <nav class="tabs">
+      <button data-tab="fill" class="on">Fill a document</button>
+      <button data-tab="info">My information</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+
+    <div id="tab-fill">
+      <div id="drop" class="drop">
+        <div class="big">Drop a document here</div>
+        <div class="muted">PDF · Word · Pages · OpenDocument · Excel · PowerPoint · photos/scans · HTML · text</div>
+        <button class="primary" id="pick-doc">Choose a file…</button>
+        <input type="file" id="doc-file" hidden>
+      </div>
+      <div id="work" hidden>
+        <div class="workbar">
+          <div class="title"><b id="doc-name"></b><span class="muted" id="doc-summary"></span></div>
+          <div class="actions">
+            <label class="check" id="cover-wrap"><input type="checkbox" id="cover" checked> Hide dots/lines under my text</label>
+            <button id="close-doc">Close</button>
+            <button id="save-png" hidden>Download as PNG</button>
+            <button class="primary" id="save-doc">Download filled file</button>
+          </div>
+        </div>
+        <div id="notice" class="notice" hidden></div>
+        <div class="split">
+          <div id="editor" class="editor"></div>
+          <div class="side">
+            <h3>Blanks found</h3>
+            <p class="muted small hint-visual">Pick what goes in each blank. On the page: drag things to move them, click an empty spot to add something.</p>
+            <div id="blank-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-info" hidden>
+      <div class="infobar">
+        <p class="muted">Fill in only what you want. Empty fields are skipped. Everything is saved encrypted.</p>
+        <span id="dirty" class="badge" hidden>Not saved</span>
+        <button class="primary" id="save-vault">Save</button>
+      </div>
+      <div class="card">
+        <h3>Signature</h3>
+        <div class="sigwrap">
+          <canvas id="sigpad" width="600" height="200" title="Draw here"></canvas>
+          <div class="sigbtns">
+            <button id="sig-clear">Clear</button>
+            <button id="sig-use" class="primary">Use this drawing</button>
+            <label class="button">Upload a photo/scan…<input type="file" id="sig-file" accept="image/*" hidden></label>
+          </div>
+        </div>
+        <div class="sigcur"><span class="muted">Saved signature:</span> <span id="sig-none" class="muted">none yet</span><img id="sig-img" alt="your signature" hidden><button id="sig-remove" class="mini danger" hidden>Remove</button></div>
+        <p class="muted small">Tip: sign in black pen on white paper, take a photo, upload it. The paper is removed automatically.</p>
+      </div>
+      <div id="info-form"></div>
+      <div class="card">
+        <h3>My extra fields</h3>
+        <p class="muted small">Anything else forms ask for. "Also called" lists other words a form may use for it, separated by commas.</p>
+        <div id="custom-list"></div>
+        <button id="add-custom">+ Add a field</button>
+      </div>
+    </div>
+
+    <div id="tab-settings" hidden>
+      <div class="card">
+        <h3>Backup</h3>
+        <p class="muted">Download your encrypted vault and keep a copy somewhere safe (USB stick, cloud). It is useless without your password.</p>
+        <button id="backup" class="primary">Download my-info.vault</button>
+        <label class="check"><input type="checkbox" id="set-remember"> Keep the locked vault in this browser</label>
+      </div>
+      <div class="card grid">
+        <label class="fld"><span>Date format (for "today")</span>
+          <select id="set-date"><option>dd.mm.yyyy</option><option>dd/mm/yyyy</option><option>yyyy-mm-dd</option><option>mm/dd/yyyy</option></select></label>
+        <label class="fld"><span>Lock automatically after</span>
+          <select id="set-lock"><option value="5">5 minutes idle</option><option value="10">10 minutes idle</option><option value="30">30 minutes idle</option><option value="0">never</option></select></label>
+        <label class="fld"><span>Text colour on PDFs/pictures</span>
+          <select id="set-ink"><option value="black">Black</option><option value="blue">Blue (like a pen)</option></select></label>
+      </div>
+      <div class="card">
+        <h3>Change password</h3>
+        <form id="pw-form" class="stack narrowform">
+          <input type="password" id="pw-cur" placeholder="Current password" autocomplete="current-password">
+          <input type="password" id="pw-new" placeholder="New password" autocomplete="new-password">
+          <input type="password" id="pw-new2" placeholder="Repeat new password" autocomplete="new-password">
+          <button>Change password</button>
+        </form>
+      </div>
+      <p class="muted small">AutoFill · everything runs inside this one file. PDF reading: pdf.js · PDF writing: pdf-lib · zip: JSZip · font: DejaVu Sans.</p>
+    </div>
+  </section>
+</main>
+<div id="toasts"></div>
+<!--SCRIPTS-->
+</body>
+</html>

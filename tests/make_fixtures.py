@@ -1,0 +1,70 @@
+# Creates sample forms of every type in tests/fixtures.
+# Run: uv run --with python-docx --with openpyxl --with python-pptx --with pillow tests/make_fixtures.py
+import zipfile, io, os
+from docx import Document
+from docx.shared import Pt
+from openpyxl import Workbook
+from pptx import Presentation
+from PIL import Image, ImageDraw, ImageFont
+
+D = os.path.join(os.path.dirname(__file__), 'fixtures')
+os.makedirs(D, exist_ok=True)
+
+# --- Word: Romanian "cerere" with blanks, a split label, a table and a placeholder
+doc = Document()
+doc.add_heading('CERERE', 1)
+p = doc.add_paragraph()
+r = p.add_run('Subsemnatul(a) '); r.bold = True
+p.add_run('______________________, CNP ______________, născut(ă) la data de __________, ')
+p.add_run('domiciliat(ă) în ____________, str. ____________ nr. ____, telefon ______________, '
+          'legitimat(ă) cu CI seria ____ nr. ________, vă rog să-mi aprobați cererea.')
+doc.add_paragraph('Email: {{email}}')
+doc.add_paragraph('Observații:')
+t = doc.add_table(rows=3, cols=2)
+t.style = 'Table Grid'
+for i, lab in enumerate(['Nume', 'Prenume', 'IBAN']):
+    t.cell(i, 0).text = lab
+doc.add_paragraph('Data: ____________\t\tSemnătura: ____________')
+doc.save(os.path.join(D, 'cerere.docx'))
+
+# --- Excel
+wb = Workbook(); ws = wb.active
+ws['A1'] = 'Formular înscriere'
+ws['A3'] = 'Nume și prenume'; ws['A4'] = 'CNP'; ws['A5'] = 'Telefon:'; ws['A6'] = 'Email'
+ws['A8'] = 'Localitatea: ______________'
+wb.save(os.path.join(D, 'inscriere.xlsx'))
+
+# --- PowerPoint
+pr = Presentation(); s = pr.slides.add_slide(pr.slide_layouts[1])
+s.shapes.title.text = 'Prezentare {{full_name}}'
+s.placeholders[1].text = 'Contact: ____________\nȘcoala: ____________'
+pr.save(os.path.join(D, 'slides.pptx'))
+
+# --- HTML form
+open(os.path.join(D, 'form.html'), 'w').write('''<!doctype html><html><body>
+<form><label for="fn">First name</label><input id="fn" name="firstName">
+<label>Last name <input name="lname"></label>
+<input name="email" type="email" placeholder="Email address">
+<textarea name="address" aria-label="Home address"></textarea></form>
+<p>I, ____________, born on __________, agree.</p><p>Signature: ____________</p>
+</body></html>''')
+
+# --- Text
+open(os.path.join(D, 'declaratie.txt'), 'w').write(
+    'DECLARAȚIE\n\nSubsemnatul ......................................., CNP .......................,\n'
+    'cu domiciliul în ..............................................\nTelefon:\nData: ...............\n')
+
+# --- Image of a form (scan-like) and a fake Pages file with a preview picture
+img = Image.new('RGB', (1240, 1754), 'white'); g = ImageDraw.Draw(img)
+try:
+    f = ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf', 34)
+except Exception:
+    f = ImageFont.load_default()
+g.text((120, 150), 'Nume: ____________________', fill='black', font=f)
+g.text((120, 250), 'Semnătura: _______________', fill='black', font=f)
+img.save(os.path.join(D, 'scan.jpg'), quality=90)
+buf = io.BytesIO(); img.resize((620, 877)).save(buf, 'JPEG')
+with zipfile.ZipFile(os.path.join(D, 'note.pages'), 'w') as z:
+    z.writestr('Index/Document.iwa', b'\x00')
+    z.writestr('preview.jpg', buf.getvalue())
+print('fixtures written')
