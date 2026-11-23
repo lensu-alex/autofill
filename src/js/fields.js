@@ -113,10 +113,24 @@ function classify(label, compiled, opts = {}) {
       const tail = L.length - (idx + s.length + 2);
       if (tail > maxTail) continue;
       const score = s.length * 2 - tail * 3;
-      if (!best || score > best.score) best = { key: f.key, syn: s, score };
+      if (!best || score > best.score) best = { key: f.key, syn: s, score, tail };
     }
   }
-  if (!best) return null;
+  classify.lastGuess = false;
+  if (!best) {
+    // nothing matched exactly: try similarity (typos, scan misreads, other languages)
+    if (opts.fuzzy === false || typeof fuzzyClassify !== 'function') return null;
+    const g = fuzzyClassify(label, compiled, opts.fuzzyMin ?? 0.66);
+    if (!g) return null;
+    classify.lastGuess = true;
+    return g.key;
+  }
+  // a rule hit followed by other words ("Date de naissance", "Numele si prenumel") may really be
+  // a longer phrase that only similarity recognises
+  if (best.tail >= 4 && opts.fuzzy !== false && typeof fuzzyClassify === 'function') {
+    const g = fuzzyClassify(label, compiled, 0.82);
+    if (g && g.key !== best.key && g.phrase.length > best.syn.length + 2) { classify.lastGuess = true; return g.key; }
+  }
   if (best.key[0] !== '@') return best.key;
 
   if (best.key === '@nume') return opts.docHasPrenume ? 'last_name' : 'full_name';

@@ -360,6 +360,7 @@ const App = {
 
   setKey(b, key, text) {
     b.key = key || null;
+    b.guess = false;
     if (key === '__text') b.text = text;
     if (this.sess.type === 'pdf') setBlankKind(b, key, this.vault);
     if (this.editor) { this.editor.draw(b); this.editor.select(b); }
@@ -401,12 +402,13 @@ const App = {
       const tooLong = val?.text && b.kind === 'text' && b.maxW > 10 && textWidth(val.text, b.size * 0.72) > b.maxW * 1.05;
       const preview = val ? (val.image ? h('img', { src: val.image.dataUrl, class: 'sigthumb' }) : h('span', { text: val.text }))
         : h('span', { class: 'muted', text: unticked ? '☐ stays unticked' : b.key ? (b.key === 'signature' ? 'no signature saved' : 'empty in your info') : 'not filled' });
-      const row = h('div', { class: 'row ' + status, 'data-id': b.id },
+      const row = h('div', { class: 'row ' + status + (b.guess && val ? ' guess' : ''), 'data-id': b.id },
         h('div', { class: 'ctx' },
           b.where ? h('span', { class: 'where', text: b.where }) : null,
           h('span', { text: b.before ? '…' + b.before : '' }), h('mark', { text: ' ▢ ' }), h('span', { text: b.after ? b.after + '…' : '' })),
         h('div', { class: 'pick' }, this.fieldSelect(b, (k, t) => this.setKey(b, k, t)), h('div', { class: 'val' }, preview)),
-        tooLong ? h('div', { class: 'warn', text: '⚠ Longer than the blank: check it on the page, drag it or make it smaller' }) : null);
+        tooLong ? h('div', { class: 'warn', text: '⚠ Longer than the blank: check it on the page, drag it or make it smaller' }) : null,
+        b.guess && val ? h('div', { class: 'warn', text: '≈ Best guess from similar wording: please check' }) : null);
       if (this.editor) row.addEventListener('click', (e) => { if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'OPTION') this.editor.select(b, true); });
       list.append(row);
     }

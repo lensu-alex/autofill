@@ -64,11 +64,12 @@ function assignBlank(b, compiled, opts) {
     if (direct) return direct.key[0] === '@' ? null : direct.key;
     return classify(b.name, compiled, { ...opts, maxTail: 40 });
   }
-  let k = classify(b.label, compiled, { ...opts, window: b.window });
+  let k = classify(b.label, compiled, { ...opts, window: b.window, fuzzyMin: b.kind === 'insert' ? 0.75 : opts.fuzzyMin });
+  b.guess = !!(k && classify.lastGuess);
   if (!k) {
     // "______ (nume și prenume)" — the hint is after the blank
     const m = /^\s*\(([^)]{2,50})\)/.exec(b.after || '');
-    if (m) k = classify(m[1], compiled, { ...opts, maxTail: 30 });
+    if (m) { k = classify(m[1], compiled, { ...opts, maxTail: 30 }); b.guess = !!(k && classify.lastGuess); }
   }
   return k;
 }
@@ -114,7 +115,7 @@ function textOfSegs(segs) { return segs.map((s) => (s.node ? s.node.data : s.tex
 function tableBlanks(rows, text, compiled, opts) {
   const out = [];
   const used = new Set();
-  const isLabel = (t) => t && t.length <= 60 && classify(t, compiled, { ...opts, maxTail: 14 });
+  const isLabel = (t) => t && t.length <= 60 && classify(t, compiled, { ...opts, maxTail: 14, fuzzyMin: 0.75 });
   rows.forEach((row, r) => {
     row.forEach((cell, c) => {
       const t = text(cell).trim();
@@ -140,7 +141,7 @@ function tableBlanks(rows, text, compiled, opts) {
 function contextSnippet(b) {
   const before = (b.window || b.label || '').replace(/\s+/g, ' ').trimStart().slice(-48);
   const after = (b.after || '').replace(/\s+/g, ' ').slice(0, 28);
-  return { before, after };
+  return { before, after, guess: !!b.guess };
 }
 
 // Second look using neighbours: "domiciliat în ____, str. ____ nr. __" wants only the city

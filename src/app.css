@@ -64,6 +64,7 @@ button.danger { color: var(--bad); }
 #work.visual .row { cursor: pointer; }
 .row.ok { border-left-color: var(--good); }
 .row.missing { border-left-color: var(--warn); }
+.row.guess { border-left-color: #e0a526; border-left-style: dashed; }
 .row.unknown { border-left-color: #b9c2d6; }
 .row.sel { outline: 2px solid var(--accent); }
 .ctx { font-size: 13px; color: var(--muted); margin-bottom: 6px; word-break: break-word; }

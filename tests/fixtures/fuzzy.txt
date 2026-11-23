@@ -1,0 +1,11 @@
+FORMULAR (scanat, cu greseli)
+
+Numele si prenumel: ______________________
+Domicilul stabil: ______________________________
+Telefo mobil: ________________
+Adresse e-mail: ________________
+Date de naissance: ____________
+Geburtsort: ______________
+Unitatea scolara: ____________________
+Observatii: ______________________________
+Motivul cererii: ______________________________
