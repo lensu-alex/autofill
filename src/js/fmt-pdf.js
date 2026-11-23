@@ -296,7 +296,7 @@ async function processPdf(bytes, env, meta = {}) {
     if (existing.trim()) key = null;
     blanks.push({
       ...base, maxLen: type === 'text' ? f.getMaxLength() : undefined,
-      key, before: (left?.str || above?.str || name).trim().slice(-48), after: existing ? `(already: ${existing.slice(0, 20)})` : '',
+      key, before: (left?.str || above?.str || name).trim().slice(-48), labelText: left?.str || above?.str || name, after: existing ? `(already: ${existing.slice(0, 20)})` : '',
       canImage: true,
     });
   }

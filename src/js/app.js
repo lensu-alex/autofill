@@ -359,12 +359,27 @@ const App = {
   },
 
   setKey(b, key, text) {
+    if (key && key[0] !== '_' && key !== b.key && !b.manual) this.learn(b, key);
     b.key = key || null;
     b.guess = false;
     if (key === '__text') b.text = text;
     if (this.sess.type === 'pdf') setBlankKind(b, key, this.vault);
     if (this.editor) { this.editor.draw(b); this.editor.select(b); }
     this.renderList();
+  },
+
+  // Remember "this wording means that field" for next time (stored encrypted in the vault)
+  learn(b, key) {
+    const phrase = learnPhrase(b.labelText || b.before);
+    if (phrase.replace(/ /g, '').length < 3) return;
+    const L = (this.vault.learned = this.vault.learned || []);
+    const i = L.findIndex((x) => x.phrase === phrase);
+    if (i >= 0) L.splice(i, 1);
+    L.push({ phrase, key });
+    if (L.length > 500) L.shift();
+    this.refreshValues();
+    if (this.settings().remember) this.saveVault().catch(() => {});
+    else this.markDirty();
   },
 
   addBlank(b) {

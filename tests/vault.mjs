@@ -39,5 +39,15 @@ console.log('restored:', await p.evaluate(() => JSON.stringify(App.values)));
 await p.setInputFiles('#doc-file', { name: 'x.txt', mimeType: 'text/plain', buffer: Buffer.from('Nr. auto: ________\nCNP: ____________\n') });
 await p.waitForSelector('#work[data-ready]');
 console.log('custom match:', await p.$$eval('#blank-list select', (s) => s.map((x) => x.value).join(', ')));
+// Teach it: "Motivul cererii" -> occupation, then a new document with the same words gets it automatically
+await p.click('#close-doc');
+await p.setInputFiles('#doc-file', { name: 'a.txt', mimeType: 'text/plain', buffer: Buffer.from('Motivul cererii: ____________\n') });
+await p.waitForSelector('#work[data-ready]');
+await p.fill('[data-key]', '').catch(() => {});
+await p.selectOption('#blank-list select', 'cnp');
+await p.click('#close-doc');
+await p.setInputFiles('#doc-file', { name: 'b.txt', mimeType: 'text/plain', buffer: Buffer.from('Ceva\nMotivul cererii: ______\n') });
+await p.waitForSelector('#work[data-ready]');
+console.log('learned:', await p.$$eval('#blank-list select', (s) => s.map((x) => x.value).join(', ')), await p.evaluate(() => JSON.stringify(App.vault.learned)));
 console.log('errors:', errors.length ? errors : 'none');
 await b.close();

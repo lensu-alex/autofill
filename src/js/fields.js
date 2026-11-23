@@ -89,6 +89,8 @@ const AMBIG_CONTEXT = {
 // Build the matcher list for a vault (defaults + your custom fields)
 function compileFields(vault) {
   const list = [...FIELD_DEFS, ...SPECIAL_FIELDS, ...AMBIGUOUS].map((f) => ({ key: f.key, synN: f.syn.map(norm) }));
+  // wordings you taught it by correcting a blank
+  for (const l of vault?.learned || []) list.push({ key: l.key, synN: [l.phrase] });
   for (const c of vault?.custom || []) {
     const syn = [c.label, ...(c.aliases || '').split(',')].map(norm).filter(Boolean);
     list.push({ key: c.key, synN: syn });
@@ -191,4 +193,11 @@ function allFieldOptions(vault) {
   }
   out.push({ group: 'Other', items: SPECIAL_FIELDS.map((f) => ({ key: f.key, label: f.label })) });
   return out;
+}
+
+// The words right before a blank, as a phrase to remember
+function learnPhrase(label) {
+  const t = norm(cleanLabel(String(label || '').split(/_{3,}|\.{4,}|\u2026|\t/).pop()));
+  const w = t.split(' ').filter((x) => x && !/^\d+$/.test(x)).slice(-4);
+  return w.join(' ');
 }

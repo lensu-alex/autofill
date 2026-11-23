@@ -141,7 +141,7 @@ function tableBlanks(rows, text, compiled, opts) {
 function contextSnippet(b) {
   const before = (b.window || b.label || '').replace(/\s+/g, ' ').trimStart().slice(-48);
   const after = (b.after || '').replace(/\s+/g, ' ').slice(0, 28);
-  return { before, after, guess: !!b.guess };
+  return { before, after, guess: !!b.guess, labelText: (b.kind === 'placeholder' ? b.name : b.label) || '' };
 }
 
 // Second look using neighbours: "domiciliat în ____, str. ____ nr. __" wants only the city
