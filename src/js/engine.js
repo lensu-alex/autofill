@@ -12,7 +12,7 @@ function isFiller(s) {
   const u = (s.match(/_/g) || []).length;
   const d = (s.match(/\./g) || []).length;
   const e = (s.match(/…/g) || []).length;
-  return u + d * 0.75 + e * 2.5 >= 3;
+  return u >= 2 || u + d * 0.75 + e * 2.5 >= 3; // "nr. __" counts too
 }
 
 // ctx: { prevText, nextText } neighbouring lines, for labels on the line above
@@ -53,6 +53,12 @@ function findBlanks(text, ctx = {}) {
     if (overlaps(at, at + 1)) continue;
     out.push({ start: at, end: at, kind: 'insert' });
   }
+  // "seria  ," (only spaces before the comma) and "CNP<tab>" (a tab where the value goes)
+  for (const m of ctx.noGap ? [] : text.matchAll(/([A-Za-zĂÂÎȘȚăâîșțşţ.)]+)( {2,}(?=[,;])|[ \u00a0]*\t)/g)) {
+    const at = m.index + m[1].length;
+    if (overlaps(at, at + 1) || out.some((x) => x.kind === 'insert' && x.start === at)) continue;
+    out.push({ start: at, end: at, kind: 'insert', gap: true });
+  }
   out.sort((a, b) => a.start - b.start);
 
   let prev = 0;
@@ -68,7 +74,18 @@ function findBlanks(text, ctx = {}) {
 }
 
 // Decide which field a blank should get
+// "____ lei", "____ %", "____ ani": the blank holds an amount, never a name or an address
+const UNIT_AFTER = /^[\s.,]*(lei|ron|euro|eur|usd|\$|€|%|ani|luni|zile|ore|kg|cm|m2|mp|ha|puncte|pct)\b/i;
 function assignBlank(b, compiled, opts) {
+  const k = assignBlank0(b, compiled, opts);
+  if (k && UNIT_AFTER.test(b.after || '')) {
+    const unit = norm(b.after).split(' ')[0];
+    return unit === 'ani' && k === 'age' ? k : null;
+  }
+  return k;
+}
+
+function assignBlank0(b, compiled, opts) {
   if (b.kind === 'placeholder') {
     const n = norm(b.name).replace(/ /g, '_');
     const direct = compiled.find((f) => f.key === n);
@@ -83,6 +100,12 @@ function assignBlank(b, compiled, opts) {
     const words = lab.split(/\s+/).filter(Boolean);
     const caps = lab.replace(/[^A-Za-zĂÂÎȘȚăâîșț]/g, '');
     if (!words.length || words.length > 7 || (words.length >= 2 && caps.length > 4 && caps === caps.toUpperCase())) return null;
+    // a gap of spaces/tab right after a word: only that word (and the one or two before) can be the label
+    if (b.gap) {
+      const k = classify(words.slice(-3).join(' '), compiled, { ...opts, window: b.window, maxTail: 0, fuzzy: false });
+      b.noSmart = true;
+      return k;
+    }
     const listItem = /^\s*(\d{1,2}[.)]|[a-zA-Z][.)]|[-•–·])\s/.test(b.label);
     k = classify(lab, compiled, { ...opts, window: b.window, maxTail: 3, maxLead: 2, fuzzy: words.length <= 3 && !listItem, fuzzyMin: 0.75 });
     if (listItem) b.noSmart = true;
@@ -172,7 +195,7 @@ function tableBlanks(rows, text, compiled, opts) {
 function contextSnippet(b) {
   const before = (b.window || b.label || '').replace(/\s+/g, ' ').trimStart().slice(-48);
   const after = (b.after || '').replace(/\s+/g, ' ').slice(0, 28);
-  return { before, after, guess: !!b.guess, noSmart: !!b.noSmart, labelText: (b.kind === 'placeholder' ? b.name : b.label) || '' };
+  return { before, after, guess: !!b.guess, noSmart: !!b.noSmart || UNIT_AFTER.test(b.after || ''), amount: UNIT_AFTER.test(b.after || ''), gap: !!b.gap, labelText: (b.kind === 'placeholder' ? b.name : b.label) || '' };
 }
 
 // Second look using neighbours: "domiciliat în ____, str. ____ nr. __" wants only the city
@@ -211,9 +234,17 @@ function sectionsOf(texts) {
   });
 }
 const OTHER_SECTION = /\b(copil|copii|copiii|copiilor|copilului|minor|minori|minorului|parinti|parintilor|sot|sotie|sotului|sotiei|reprezentant|reprezentantului|imputernicit|imputernicitului|tutore|garant|codebitor|mostenitor|decedat|defunct|child|children|spouse|parent|parents|guardian|representative|requester)\b/;
+const OFFICE_SECTION = /\b(comisia|rezervat|uz intern|uz oficial|for office use|official use|se completeaza de|completat de|aviz|avizat|aprobat|viza|presedintele|secretar|inspector|registratura)\b/;
 const SELF_SECTION = /\b(solicitant|solicitantului|subsemnat|titular|titularului|date personale|applicant|your details|personal details|despre dumneavoastra)\b/;
 function applySections(blanks) {
   for (const b of blanks) {
+    // parts of the form filled in by the office ("Comisia de burse", "Se completează de secretariat")
+    const lab = norm(b.labelText || '');
+    if ((b.section && OFFICE_SECTION.test(norm(b.section))) || /^(presedintele|membri|secretar|inspector|registrator|viza|aprobat|avizat)\b/.test(lab)) {
+      if (b.key !== 'signature' || /comisia|presedint|membri|secretar/.test(norm(b.section || '') + ' ' + lab)) { b.key = null; b.optional = true; continue; }
+    }
+    // a bare line of underscores continuing a list ("anexez următoarele acte: ____ / ____ / ____")
+    if (!b.key && !lab.replace(/[\s_.…]/g, '') && b.kind !== 'field' && b.kind !== 'cell') { b.optional = true; continue; }
     if (!b.section || !b.key || b.key === 'today' || b.key === 'signature') continue;
     const n = norm(b.section);
     if (OTHER_SECTION.test(n) && !SELF_SECTION.test(n)) {

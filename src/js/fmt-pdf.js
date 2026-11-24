@@ -447,7 +447,8 @@ async function processPdf(bytes, env, meta = {}) {
     const right = P.view[2] - 24;
     P.lines.forEach((l, li) => {
       const section = lineSections[lineNo++];
-      const found = findBlanks(l.str, { prevText: P.lines[li - 1]?.str || '', nextText: P.lines[li + 1]?.str || '' });
+      // in PDFs a wide gap is usually layout (columns, tables), not a blank
+      const found = findBlanks(l.str, { prevText: P.lines[li - 1]?.str || '', nextText: P.lines[li + 1]?.str || '', noGap: true });
       for (const b of found) {
         const key = assignBlank(b, env.compiled, opts);
         const optional = b.kind === 'insert' && !key;

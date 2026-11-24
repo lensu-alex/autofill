@@ -47,8 +47,10 @@ await click('.tabs button[data-tab="fill"]');
 
 // argv[3]: a fixture name, or a folder (e.g. tests/real) to run every file in it
 const arg = process.argv[3];
-const dir = arg && statSync(arg, { throwIfNoEntry: false })?.isDirectory() ? arg.replace(/\/?$/, '/') : root + 'tests/fixtures/';
-const files = arg && dir.endsWith('fixtures/') ? [arg] : readdirSync(dir).filter((f) => !f.startsWith('.') && !f.endsWith('.py'));
+const st = arg && statSync(arg, { throwIfNoEntry: false });
+const isFile = st && st.isFile();
+const dir = st && st.isDirectory() ? arg.replace(/\/?$/, '/') : isFile ? arg.replace(/[^/]*$/, '') : root + 'tests/fixtures/';
+const files = isFile ? [arg.split('/').pop()] : arg && dir.endsWith('fixtures/') ? [arg] : readdirSync(dir).filter((f) => !f.startsWith('.') && !f.endsWith('.py'));
 for (const f of files) {
   await page.setInputFiles('#doc-file', dir + f);
   try { await page.waitForSelector('#work[data-ready]', { timeout: 120000 }); }

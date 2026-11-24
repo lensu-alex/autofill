@@ -24,7 +24,7 @@ const FIELD_DEFS = [
   { key: 'father_name', group: 'identity', label: "Father's first name · Tatăl", syn: ['fiul lui', 'fiica lui', 'numele tatalui', 'prenumele tatalui', 'tatal', 'father s name', 'fathers name', 'father name', 'father'] },
   { key: 'mother_name', group: 'identity', label: "Mother's first name · Mama", syn: ['si al', 'numele mamei', 'prenumele mamei', 'mama', 'mother s name', 'mothers name', 'mother name', 'mother'] },
 
-  { key: 'id_series', group: 'id', label: 'ID series · Seria', syn: ['seria', 'serie', 'seria ci', 'seria bi', 'ci seria', 'bi seria', 'id series'] },
+  { key: 'id_series', group: 'id', label: 'ID series · Seria', syn: ['seria ci', 'seria bi', 'ci seria', 'bi seria', 'id series'] },
   { key: 'id_number', group: 'id', label: 'ID number · Număr', syn: ['numar ci', 'nr ci', 'numarul ci', 'passport number', 'passport no', 'document number', 'numar document', 'nr document', 'numar pasaport', 'nr pasaport', 'id card number', 'id number', 'id no'] },
   { key: 'id_issued_by', group: 'id', label: 'Issued by · Eliberat de', syn: ['eliberat de', 'eliberata de', 'emis de', 'emisa de', 'issued by', 'issuing authority', 'autoritatea emitenta'] },
   { key: 'id_issue_date', group: 'id', label: 'Issue date · Data eliberării', syn: ['data eliberarii', 'eliberat la data de', 'eliberat la data', 'date of issue', 'issue date', 'issued on'] },
@@ -51,7 +51,10 @@ const FIELD_DEFS = [
   { key: 'school', group: 'work', label: 'School / university · Școala / Universitatea', syn: ['unitatea de invatamant', 'scoala', 'liceul', 'colegiul', 'universitatea', 'universitate', 'institutia de invatamant', 'school', 'university', 'college', 'institution'] },
   { key: 'faculty', group: 'work', label: 'Faculty · Facultatea', syn: ['facultatea', 'facultatii', 'facultate', 'faculty', 'faculty of', 'school of', 'departamentul', 'department'] },
   { key: 'study_program', group: 'work', label: 'Study programme · Programul de studii', syn: ['programul de studii', 'program de studii', 'programul de studiu', 'specializarea', 'specializare', 'specializarii', 'specialization', 'study programme', 'study program', 'programme', 'major', 'domeniul de studii', 'domeniul'] },
-  { key: 'class_grade', group: 'work', label: 'Class / year of study · Clasa / anul de studiu', syn: ['clasa', 'class', 'grade', 'anul de studiu', 'an de studiu', 'anul de studii', 'year of study', 'grupa', 'study year'] },
+  { key: 'study_cycle', group: 'work', label: 'Study level · Ciclul de studii', hint: 'e.g. Licență / Master', syn: ['ciclul de studii', 'ciclu de studii', 'ciclul de studiu', 'nivelul de studii', 'nivel de studii', 'study cycle', 'level of study', 'degree level', 'study level'] },
+  { key: 'study_form', group: 'work', label: 'Study mode · Forma de învățământ', hint: 'e.g. IF (cu frecvență)', syn: ['forma de invatamant', 'forma invatamant', 'forma de studiu', 'forma de studii', 'mode of study', 'study mode', 'attendance'] },
+  { key: 'class_grade', group: 'work', label: 'Class / year of study · Clasa / anul de studiu', syn: ['clasa', 'class', 'grade', 'anul de studiu', 'an de studiu', 'anul de studii', 'year of study', 'study year'] },
+  { key: 'study_group', group: 'work', label: 'Group / series · Grupa / seria', syn: ['grupa', 'grupa de studiu', 'seria de studiu', 'seria de studii', 'formatia de studiu', 'group', 'study group'] },
   { key: 'student_id', group: 'work', label: 'Student ID · Nr. matricol', syn: ['numar matricol', 'nr matricol', 'matricol', 'student id', 'student number'] },
 
   { key: 'iban', group: 'bank', label: 'IBAN', syn: ['iban', 'cont iban', 'cod iban', 'cont bancar', 'contul', 'bank account', 'account number', 'cont'] },
@@ -81,6 +84,7 @@ const AMBIGUOUS = [
   { key: '@date', syn: ['data', 'date', 'la data de', 'la data', 'din data de', 'pe data de', 'in data de', 'data de'] },
   { key: '@nume', syn: ['nume', 'numele'] },
   { key: '@in', syn: ['in'] },
+  { key: '@seria', syn: ['seria', 'serie'] },
   { key: '@zi', syn: ['ziua', 'zi', 'day'] },
   { key: '@luna', syn: ['luna', 'month'] },
   { key: '@an', syn: ['anul', 'an', 'year'] },
@@ -99,6 +103,10 @@ const AMBIG_CONTEXT = {
   '@zi': [['birth_day', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_day', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
   '@luna': [['birth_month', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_month', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
   '@an': [['class_grade', ['student', 'studenta', 'studentul', 'studentei', 'facultatii', 'facultatea', 'studii', 'specializarea', 'elev', 'eleva', 'elevul']], ['birth_year', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_year', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
+  '@seria': [
+    ['id_series', ['ci', 'bi', 'buletin', 'buletinul', 'act', 'actul', 'identitate', 'pasaport', 'legitimat', 'legitimata', 'posesor', 'posesoare', 'cartea', 'carte', 'carnet']],
+    ['study_group', ['anul', 'an', 'specializarea', 'grupa', 'student', 'studenta', 'facultatea', 'facultatii', 'licenta', 'master', 'programul', 'studiu', 'studii']],
+  ],
   '@in': [
     ['birth_place', ['nascut', 'nascuta', 'nastere']],
     ['address', ['domiciliat', 'domiciliata', 'domiciliul', 'locuiesc', 'locuieste', 'resedinta']],
@@ -130,7 +138,7 @@ function compileFields(vault) {
 // A light Romanian stemmer: "facultății" -> "facultat", "domiciliului" -> "domicili", "studenta" -> "student"
 const RO_SUFFIXES = ['urilor', 'iilor', 'ilor', 'elor', 'ului', 'atii', 'atea', 'urile', 'uri', 'ul', 'ua', 'lor', 'iu', 'ii', 'ei', 'ea', 'ia', 'le', 'ie', 'a', 'e', 'i', 'u'];
 function stemWord(w) {
-  if (w.length < 5 || /\d/.test(w)) return w;
+  if (w.length < 6 || /\d/.test(w)) return w; // short words stay whole ("state" is not "stat")
   for (const suf of RO_SUFFIXES) if (w.endsWith(suf) && w.length - suf.length >= 4) return w.slice(0, -suf.length);
   return w;
 }
@@ -234,6 +242,7 @@ function classify(label, compiled, opts = {}) {
   }
   if (pick) return pick;
   if (best.key === '@date') return 'today';
+  if (best.key === '@seria') return 'id_series';
   // "Telephone Number": the vague word lost its meaning, so the next best word decides
   return second && second.tail <= maxTail ? second.key : null;
 }

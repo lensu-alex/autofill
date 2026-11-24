@@ -114,7 +114,8 @@ function splitCells(tokens) {
 
 async function docToDocx(bytes) {
   const text = docText(bytes);
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // old Word keeps control characters (footnote marks, objects) that XML does not allow
+  const esc = (s) => s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const para = (t) => '<w:p>' + t.split('\n').map((line, i) => (i ? '<w:r><w:br/></w:r>' : '') +
     line.split('\t').map((seg, j) => (j ? '<w:r><w:tab/></w:r>' : '') + (seg ? `<w:r><w:t xml:space="preserve">${esc(seg)}</w:t></w:r>` : '')).join('')).join('') + '</w:p>';
   const body = [];
