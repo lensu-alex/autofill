@@ -136,3 +136,12 @@ tb = '''<w:r %s xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility
 d.add_paragraph()._p.append(parse_xml(tb))
 d.save(os.path.join(D, 'textbox.docx'))
 print('textbox written')
+
+# --- PowerPoint with a table
+from pptx.util import Inches
+pr = Presentation(); s = pr.slides.add_slide(pr.slide_layouts[5])
+s.shapes.title.text = 'Date participant'
+tbl = s.shapes.add_table(3, 2, Inches(1), Inches(2), Inches(6), Inches(1.5)).table
+for i, lab in enumerate(['Nume și prenume', 'E-mail', 'Telefon']): tbl.cell(i, 0).text = lab
+pr.save(os.path.join(D, 'table.pptx'))
+print('pptx table written')

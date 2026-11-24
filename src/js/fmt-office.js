@@ -474,8 +474,32 @@ async function processPptx(bytes, env) {
   const opts = { docHasPrenume: /prenume/.test(norm(parts.map((p) => p.xml.documentElement.textContent).join(' '))) };
   const blanks = [];
   for (const part of parts) {
-    const paras = [...part.xml.getElementsByTagNameNS(NS.a, 'p')];
-    blanks.push(...paragraphBlanks(paras, aSegs, env, opts, 'slide ' + part.name.match(/\d+/)[0], null));
+    const doc = part.xml;
+    const where = 'slide ' + part.name.match(/\d+/)[0];
+    // tables on slides: "Nume | (empty)"
+    const labelCells = new Set();
+    for (const tbl of doc.getElementsByTagNameNS(NS.a, 'tbl')) {
+      const rows = kids(tbl, NS.a, 'tr').map((tr) => kids(tr, NS.a, 'tc'));
+      for (const tb of tableBlanks(rows, (c) => [...c.getElementsByTagNameNS(NS.a, 't')].map((t) => t.textContent).join(''), env.compiled, opts)) {
+        labelCells.add(tb.labelCell);
+        blanks.push({ key: tb.key, before: tb.label, labelText: tb.label, after: '', where: where + ' table', kind: 'cell', canImage: false,
+          apply(val) {
+            if (val.text == null) return;
+            const body = tb.cell.getElementsByTagNameNS(NS.a, 'txBody')[0] || tb.cell.getElementsByTagNameNS('*', 'txBody')[0];
+            let p = body && kids(body, NS.a, 'p')[0];
+            if (!p) return;
+            const r = doc.createElementNS(NS.a, 'a:r');
+            const t = doc.createElementNS(NS.a, 'a:t');
+            t.textContent = val.text;
+            r.appendChild(t);
+            const end = kids(p, NS.a, 'endParaRPr')[0];
+            p.insertBefore(r, end || null);
+          } });
+      }
+    }
+    const paras = [...doc.getElementsByTagNameNS(NS.a, 'p')];
+    blanks.push(...paragraphBlanks(paras, aSegs, env, opts, where, null,
+      (p) => { const tc = closestNS(p, NS.a, 'tc'); return tc && labelCells.has(tc); }));
   }
   return {
     blanks,
