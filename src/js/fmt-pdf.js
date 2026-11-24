@@ -277,9 +277,11 @@ async function processPdf(bytes, env, meta = {}) {
   try { lib = await PDFLib.PDFDocument.load(bytes, { updateMetadata: false }); }
   catch (e) {
     if (/encrypt/i.test(e.message)) throw new Error('This PDF is locked with a password. Open it in Preview, export a copy without the password, then drop that here.');
-    throw e;
+    throw new Error('This PDF looks damaged (' + e.message + '). Try opening it in Preview and choosing File → Export as PDF, then drop the new file here.');
   }
-  const js = await pdfjsOpen(bytes);
+  let js;
+  try { js = await pdfjsOpen(bytes); }
+  catch (e) { throw new Error('This PDF looks damaged (' + (e.message || e) + '). Try opening it in Preview and choosing File → Export as PDF, then drop the new file here.'); }
   const pages = [];
   for (let i = 0; i < js.numPages; i++) {
     const pg = await js.getPage(i + 1);

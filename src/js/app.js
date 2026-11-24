@@ -339,9 +339,42 @@ const App = {
   },
 
   // Reads a file and finds its blanks (no screen updates). Returns { sess, notice }.
+  // What a file really is, from its first bytes (names lie: "document", "scan.bin", "form.pdf.doc")
+  async sniff(bytes, ext) {
+    const b = bytes, ascii = (n) => String.fromCharCode(...b.subarray(0, n));
+    if (ascii(5) === '%PDF-') return 'pdf';
+    if (b[0] === 0xFF && b[1] === 0xD8) return 'jpg';
+    if (b[0] === 0x89 && ascii(4).slice(1) === 'PNG') return 'png';
+    if (ascii(4) === 'GIF8') return 'gif';
+    if (ascii(2) === 'BM') return 'bmp';
+    if ((ascii(4) === 'II*\0') || (ascii(4) === 'MM\0*')) return 'tiff';
+    if (ascii(12).slice(8) === 'WEBP') return 'webp';
+    if (ascii(12).slice(4, 8) === 'ftyp') return /hei[cfx]|mif1/.test(ascii(12).slice(8)) ? 'heic' : /avif/.test(ascii(12).slice(8)) ? 'avif' : ext;
+    if (ascii(5) === '{\\rtf') return 'rtf';
+    if (b[0] === 0xD0 && b[1] === 0xCF) return /^(doc|dot|xls|ppt|docx|xlsx|pptx|docm)$/.test(ext) ? ext : 'doc';
+    if (b[0] === 0x50 && b[1] === 0x4B) {
+      if (/^(docx|docm|dotx|xlsx|xlsm|pptx|odt|ods|odp|ott|ots|otp|odg|pages|numbers|key)$/.test(ext)) return ext;
+      try {
+        const z = await JSZip.loadAsync(bytes);
+        if (z.file('word/document.xml')) return 'docx';
+        if (z.file('xl/workbook.xml')) return 'xlsx';
+        if (z.file('ppt/presentation.xml')) return 'pptx';
+        const mt = z.file('mimetype') && (await z.file('mimetype').async('string'));
+        if (mt) return { 'application/vnd.oasis.opendocument.text': 'odt', 'application/vnd.oasis.opendocument.spreadsheet': 'ods', 'application/vnd.oasis.opendocument.presentation': 'odp' }[mt.trim()] || ext;
+        if (z.file('Index/Document.iwa')) return 'pages';
+      } catch { /* not a zip after all */ }
+      return ext;
+    }
+    if (OFFICE[ext] || IMAGES[ext] || APPLE[ext] || OLD_FORMATS[ext] || ext === 'pdf' || ext === 'doc') return ext;
+    const head = new TextDecoder('latin1').decode(b.subarray(0, 512)).toLowerCase();
+    if (/<html|<!doctype html|<body|<form/.test(head)) return 'html';
+    if (!b.subarray(0, 4096).some((x) => x === 0)) return 'txt'; // no zero bytes: some kind of text
+    return ext;
+  },
+
   async loadSession(file, env) {
-    let ext = fileExt(file.name);
     let bytes = new Uint8Array(await file.arrayBuffer());
+    let ext = await this.sniff(bytes, fileExt(file.name));
     let sess, notice = '', nativeBack = null;
     if (Native.ok() && NATIVE_TO[ext]) {
       try {
@@ -356,6 +389,10 @@ const App = {
       ext = 'docx';
       notice = 'Old Word (.doc) file: it was converted to .docx to fill it, so fonts and layout are simplified. For the original look, open it in Word or Pages, save as .docx and drop that instead.';
     }
+    // A password-protected .docx/.xlsx/.pptx is an encrypted container, not a zip
+    const cfb = bytes[0] === 0xD0 && bytes[1] === 0xCF && bytes[2] === 0x11 && bytes[3] === 0xE0;
+    if (cfb && /^(docx|docm|dotx|xlsx|xlsm|pptx)$/.test(ext)) throw new Error('This file is protected with a password. Open it, remove the password (File → Info → Protect / Encrypt), save, and drop it here again.');
+    if (/^(docx|docm|dotx|xlsx|xlsm|pptx|odt|ods|odp|ott|ots|otp|odg)$/.test(ext) && !(bytes[0] === 0x50 && bytes[1] === 0x4B)) throw new Error('This file looks damaged or is not really a .' + ext + ' file.');
     if (OLD_FORMATS[ext]) throw new Error(`Old ${OLD_FORMATS[ext]} format. Open it and "Save As" the new format (.${ext}x), then drop that here.`);
     if (ext === 'pdf' || IMAGES[ext] || APPLE[ext]) {
       let pdfBytes = bytes, px = null;
