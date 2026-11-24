@@ -665,6 +665,7 @@ async function buildPdf(sess, valueOf, opts) {
   }
   if (form) { try { form.deleteXFA(); } catch { /* not an XFA form */ } } // so every viewer shows the normal fields
   if (formTouched) form.updateFieldAppearances(font);
+  if (form && opts.flatten) { try { form.flatten({ updateFieldAppearances: false }); } catch (e) { console.warn('flatten failed', e); } }
   return doc.save({ updateFieldAppearances: false });
 }
 

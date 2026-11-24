@@ -447,6 +447,8 @@ const App = {
       $('#work').classList.toggle('visual', visual);
       $('#cover-wrap').hidden = !visual || !sess.blanks.some((b) => b.cover);
       $('#cover').checked = true;
+      $('#flatten-wrap').hidden = !visual || !sess.blanks.some((b) => b.kind === 'field');
+      $('#flatten').checked = false;
       $('#save-png').hidden = !sess.px || sess.pages.length > 1;
       $('#save-doc').textContent = sess.px ? 'Download as PDF' : 'Download filled file';
       this.editor = null;
@@ -623,7 +625,7 @@ const App = {
   async buildBlob(s, asPng, opts = {}) {
     const sigBytes = this.vault.signature ? dataUrlToBytes(this.vault.signature) : null;
     if (s.type === 'pdf') {
-      const out = await buildPdf(s, (b) => this.valueOf(b), { ink: this.settings().ink, cover: opts.cover ?? this.cover() });
+      const out = await buildPdf(s, (b) => this.valueOf(b), { ink: this.settings().ink, cover: opts.cover ?? this.cover(), flatten: opts.flatten ?? $('#flatten').checked });
       if (asPng) return { blob: await pdfPageToPng(out, s.px), name: baseName(s.name) + '-filled.png' };
       return { blob: new Blob([out], { type: 'application/pdf' }), name: baseName(s.name) + '-filled.pdf' };
     }
