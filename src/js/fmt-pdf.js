@@ -17,6 +17,9 @@ function pdfjsOpen(bytes) {
 
 // Pictures -> canvases (TIFF can have many pages; Chrome can't decode TIFF itself)
 async function imageCanvases(bytes, type) {
+  if (/tiff/.test(type) && typeof UTIF !== 'undefined') {
+    try { return tiffCanvases(bytes); } catch { /* let the browser try */ }
+  }
   try {
     const bmp = await createImageBitmap(new Blob([bytes], { type }));
     const c = document.createElement('canvas');
@@ -45,21 +48,25 @@ async function imageCanvases(bytes, type) {
       return out;
     }
     if (!/tiff/.test(type) || typeof UTIF === 'undefined') throw new Error('Could not read this picture');
-    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    const ifds = UTIF.decode(buf);
-    const out = [];
-    for (const ifd of ifds) {
-      if (!ifd.width && !ifd.t256) continue;
-      UTIF.decodeImage(buf, ifd, ifds);
-      const rgba = UTIF.toRGBA8(ifd);
-      const c = document.createElement('canvas');
-      c.width = ifd.width; c.height = ifd.height;
-      c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer), ifd.width, ifd.height), 0, 0);
-      out.push(c);
-    }
-    if (!out.length) throw new Error('Could not read this TIFF');
-    return out;
+    return tiffCanvases(bytes);
   }
+}
+
+function tiffCanvases(bytes) {
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const ifds = UTIF.decode(buf);
+  const out = [];
+  for (const ifd of ifds) {
+    if (!ifd.width && !ifd.t256) continue;
+    UTIF.decodeImage(buf, ifd, ifds);
+    const rgba = UTIF.toRGBA8(ifd);
+    const c = document.createElement('canvas');
+    c.width = ifd.width; c.height = ifd.height;
+    c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer), ifd.width, ifd.height), 0, 0);
+    out.push(c);
+  }
+  if (!out.length) throw new Error('Could not read this TIFF');
+  return out;
 }
 
 async function imageToPdf(bytes, type) {
