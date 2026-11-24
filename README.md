@@ -11,7 +11,7 @@ Fills any document with your personal information and signature, from an encrypt
 1. Open `autofill.html` → create a vault with a password (there is no reset, so keep a backup: Settings → Download my-info.vault).
 2. *My information*: fill in what you want, draw or upload your signature, Save.
 3. *Fill a document*: drop a file (or several at once → one zip). Check the list on the right, change anything, drag things on the page, click the page to add more.
-4. *Download filled file*. The original is never changed.
+4. *Download filled file*. The original is never changed. **Save as** lets you get it as PDF, Word, a picture (PNG) or text instead: documents are laid out into a PDF with real text (tables, bold, signature); PDFs and scans become pictures, a Word file with one picture per page, or plain text.
 
 ## What it can fill
 

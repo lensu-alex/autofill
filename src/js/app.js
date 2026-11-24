@@ -319,7 +319,7 @@ const App = {
     document.ondrop = (e) => { e.preventDefault(); if (this.vault && e.dataTransfer.files.length) { this.showTab('fill'); this.closeDoc(); take(e.dataTransfer.files); } };
     $('#close-doc').onclick = () => this.closeDoc();
     $('#save-doc').onclick = () => this.saveDoc();
-    $('#save-png').onclick = () => this.saveDoc(true);
+    $('#save-as').onchange = () => this.updateSaveLabel();
     $('#cover').onchange = () => this.editor && this.editor.drawAll();
     // editor keys: Delete removes, arrows nudge (Shift = 10x), Escape deselects
     document.addEventListener('keydown', (e) => {
@@ -455,8 +455,12 @@ const App = {
       $('#cover').checked = true;
       $('#flatten-wrap').hidden = !visual || !sess.blanks.some((b) => b.kind === 'field');
       $('#flatten').checked = false;
-      $('#save-png').hidden = !sess.px || sess.pages.length > 1;
-      $('#save-doc').textContent = sess.px ? 'Download as PDF' : 'Download filled file';
+      // "same type" for pictures/Pages is a PDF; Word files are already Word
+      const own = sess.type === 'pdf' ? 'pdf' : sess.ext;
+      $('#save-as').options[0].text = 'same type (.' + own + ')';
+      [...$('#save-as').options].forEach((o) => { o.hidden = o.value === own; });
+      $('#save-as').value = 'same';
+      this.updateSaveLabel();
       this.editor = null;
       if (visual) { this.editor = new PdfEditor($('#editor'), sess, this); await this.editor.render(); }
       this.renderList();
@@ -788,13 +792,20 @@ const App = {
     return { blob, name: baseName(s.name) + '-filled.' + s.ext };
   },
 
-  async saveDoc(asPng) {
+  updateSaveLabel() {
+    const v = $('#save-as').value;
+    $('#save-doc').textContent = v === 'same' ? 'Download filled file' : 'Download as ' + { pdf: 'PDF', docx: 'Word', png: 'picture', txt: 'text' }[v];
+  },
+
+  async saveDoc() {
     const s = this.sess;
     if (!s) return;
-    const btn = asPng ? $('#save-png') : $('#save-doc');
+    const btn = $('#save-doc');
     btn.disabled = true;
     try {
-      const { blob, name } = await this.buildBlob(s, asPng);
+      const built = await this.buildBlob(s, false);
+      const ext = fileExt(built.name);
+      const { blob, name } = await convertResult(built.blob, ext, $('#save-as').value, baseName(built.name));
       download(blob, name);
       toast('Saved ' + name + ' to your Downloads', 'good');
     } catch (err) {

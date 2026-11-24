@@ -63,7 +63,14 @@
             <label class="check" id="cover-wrap"><input type="checkbox" id="cover" checked> Hide dots/lines under my text</label>
             <label class="check" id="flatten-wrap" title="The filled boxes become part of the page and can't be edited any more"><input type="checkbox" id="flatten"> Lock the filled form</label>
             <button id="close-doc">Close</button>
-            <button id="save-png" hidden>Download as PNG</button>
+            <label class="check" title="Which kind of file to download">Save as
+              <select id="save-as">
+                <option value="same">same type</option>
+                <option value="pdf">PDF</option>
+                <option value="docx">Word (.docx)</option>
+                <option value="png">picture (PNG)</option>
+                <option value="txt">text (.txt)</option>
+              </select></label>
             <button class="primary" id="save-doc">Download filled file</button>
           </div>
         </div>

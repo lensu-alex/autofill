@@ -27,11 +27,12 @@ const ocrData = {
   'ocr-eng': bin('@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz'),
 };
 const font = readFileSync(new URL('./node_modules/dejavu-fonts-ttf/ttf/DejaVuSans.ttf', import.meta.url)).toString('base64');
-const app = ['util', 'fields', 'similarity', 'engine', 'fmt-office', 'fmt-doc', 'fmt-text', 'fmt-pdf', 'ocr', 'smart', 'vault', 'app'].map((f) => src(`js/${f}.js`));
+const fontBold = readFileSync(new URL('./node_modules/dejavu-fonts-ttf/ttf/DejaVuSans-Bold.ttf', import.meta.url)).toString('base64');
+const app = ['util', 'fields', 'similarity', 'engine', 'fmt-office', 'fmt-doc', 'fmt-text', 'fmt-pdf', 'convert', 'ocr', 'smart', 'vault', 'app'].map((f) => src(`js/${f}.js`));
 
 const scripts = [
   ...vendor.map((v) => `<script>${safe(v)}</script>`),
-  `<script>const FONT_B64 = "${font}";</script>`,
+  `<script>const FONT_B64 = "${font}"; const FONT_BOLD_B64 = "${fontBold}";</script>`,
   `<script>\n${safe(app.join('\n\n'))}\n</script>`,
   ...Object.entries(ocrData).map(([id, b64]) => `<script type="application/octet-stream" id="${id}">${b64}</script>`),
 ].join('\n');

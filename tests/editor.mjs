@@ -42,7 +42,9 @@ console.log('delete key removed:', before - (await page.evaluate(() => App.sess.
 console.log('items:', await page.evaluate(() => App.sess.blanks.map((b) => `${b.key}@${Math.round(b.x)},${Math.round(b.y)}`).join('  ')));
 console.log('summary:', await page.locator('#doc-summary').innerText());
 await page.locator('#editor').screenshot({ path: root + 'tests/out/editor-scan.png' });
-const [png] = await Promise.all([page.waitForEvent('download'), page.click('#save-png')]);
+await page.selectOption('#save-as', 'png');
+const [png] = await Promise.all([page.waitForEvent('download'), page.click('#save-doc')]);
+await page.selectOption('#save-as', 'same');
 await png.saveAs(root + 'tests/out/' + png.suggestedFilename());
 const [pdf] = await Promise.all([page.waitForEvent('download'), page.click('#save-doc')]);
 await pdf.saveAs(root + 'tests/out/' + pdf.suggestedFilename());
