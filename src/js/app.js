@@ -504,6 +504,12 @@ const App = {
       v = v.replace(/^(str(ada)?|bd|b-dul|bulevardul|sos(eaua)?|calea|aleea)\.?\s+/i, '');
     }
     if (!v) return null;
+    // dates follow the format the form asks for, otherwise the one in Settings
+    if (/^(birth_date|today|id_issue_date|id_expiry_date)$/.test(b.key)) {
+      const d = parseDate(v);
+      const fmt = dateHint((b.labelText ?? b.before ?? '') + ' ' + (b.after || '').slice(0, 20)) || this.settings().dateFormat;
+      if (d && fmt) v = formatDate(new Date(d.y, d.m - 1, d.d), fmt);
+    }
     // "(cu majuscule)", "in capital letters"
     if (/majuscul|litere mari|litere de tipar|capital letters|block letters|in capitals/i.test((b.before || '') + ' ' + (b.labelText || '') + ' ' + (b.after || ''))) v = v.toLocaleUpperCase('ro');
     if (b.kind === 'field' && (b.fieldType !== 'text' || b.charIndex != null || b.datePart) && b.fieldType !== 'sig') return fieldValue(b, v);

@@ -72,7 +72,17 @@ function formatDate(d, fmt) {
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const yyyy = String(d.getFullYear());
-  return (fmt || 'dd.mm.yyyy').replace('dd', dd).replace('mm', mm).replace('yyyy', yyyy);
+  return (fmt || 'dd.mm.yyyy').replace('dd', dd).replace('mm', mm).replace('yyyy', yyyy).replace('yy', yyyy.slice(2));
+}
+
+// The date format a form asks for: "(DD/MM/YYYY)", "zz.ll.aaaa", "yyyy-mm-dd", "MM/DD/YY"… -> "dd/mm/yyyy" style, or null
+function dateHint(text) {
+  const m = /\b([dDzZ]{2}|[mMlL]{2}|[yYaA]{2,4})([./\- ])([dDzZ]{2}|[mMlL]{2}|[yYaA]{2,4})\2([dDzZ]{2}|[mMlL]{2}|[yYaA]{2,4})\b/.exec(text || '');
+  if (!m) return null;
+  const part = (p) => { const c = p[0].toLowerCase(); return c === 'd' || c === 'z' ? 'dd' : c === 'm' || c === 'l' ? 'mm' : p.length >= 4 ? 'yyyy' : 'yy'; };
+  const parts = [part(m[1]), part(m[3]), part(m[4])];
+  if (new Set(parts.map((p) => p[0])).size !== 3) return null;
+  return parts.join(m[2]);
 }
 
 function loadImage(src) {

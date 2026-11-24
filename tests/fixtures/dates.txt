@@ -1,0 +1,5 @@
+Date of Birth (MM/DD/YYYY): ____________
+Data nașterii (zz.ll.aaaa): ____________
+Birth date (YYYY-MM-DD): ____________
+Data nașterii: ____________
+Valabil până la: ____________
