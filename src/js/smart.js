@@ -143,6 +143,9 @@ const Smart = {
       // the model is only trusted when one field clearly wins
       if (s1 >= (b.key ? 0.72 : 0.66) && s1 - s2 >= 0.12) {
         if (b.fieldType === 'sig' || (k1 === 'signature' && b.canImage === false)) return;
+        // "Qualification name", "Campus name": a thing's name, not yours
+        const lab = norm(b.labelText || b.before || '');
+        if (/^(full_name|first_name|last_name)$/.test(k1) && /\b(?!full|first|last|given|family|sur|middle|your|maiden|my)\w+ name\b/.test(lab) && !/\b(full|first|last|given|family|middle|your) name\b/.test(lab)) return;
         b.key = k1; b.guess = true; b.smart = true; b.smartScore = s1; placed++;
       }
     });

@@ -17,8 +17,9 @@ const FIELD_DEFS = [
   { key: 'first_name', group: 'identity', label: 'First name · Prenume', syn: ['prenume', 'prenumele', 'first name', 'given name', 'given names', 'firstname', 'forename', 'forenames', 'first and middle names', 'first and middle name', 'first names', 'prenom'] },
   { key: 'full_name', group: 'identity', label: 'Full name · Nume și prenume', hint: 'empty = first + last name', syn: ['nume si prenume', 'numele si prenumele', 'nume de familie si prenume', 'numele de familie si prenumele', 'numele si prenumele complet', 'nume prenume', 'numele complet', 'nume complet', 'full name', 'name', 'name and surname', 'your name', 'applicant name', 'subsemnatul', 'subsemnata', 'subsemnatii', 'undersigned', 'titular', 'titularul', 'solicitant', 'solicitantul', 'eu', 'i the undersigned', 'elevul', 'eleva', 'studentul', 'studenta', 'candidatul', 'candidata'] },
   { key: 'cnp', group: 'identity', label: 'CNP / personal number', syn: ['cnp', 'c n p', 'cod numeric personal', 'codul numeric personal', 'personal numeric code', 'personal identification number', 'national id number', 'pin'] },
+  { key: 'ssn', group: 'identity', label: 'US Social Security Number', syn: ['social security number', 'social security no', 'ssn', 'ss number', 'social security'] },
   { key: 'birth_date', group: 'identity', label: 'Date of birth · Data nașterii', syn: ['data nasterii', 'data de nastere', 'nascut la data de', 'nascuta la data de', 'nascut la', 'nascuta la', 'date of birth', 'birth date', 'birthdate', 'dob', 'born on'] },
-  { key: 'birth_place', group: 'identity', label: 'Place of birth · Locul nașterii', syn: ['locul nasterii', 'loc nastere', 'locul de nastere', 'nascut in', 'nascuta in', 'place of birth', 'birthplace', 'born in', 'town of birth', 'city of birth', 'localitatea nasterii', 'localitatea de nastere'] },
+  { key: 'birth_place', group: 'identity', label: 'Place of birth · Locul nașterii', syn: ['locul nasterii', 'loc nastere', 'locul de nastere', 'nascut in', 'nascuta in', 'place of birth', 'birthplace', 'born in', 'town of birth', 'city of birth', 'place and country of birth', 'town and country of birth', 'city and country of birth', 'localitatea nasterii', 'localitatea de nastere'] },
   { key: 'gender', group: 'identity', label: 'Sex / gender', syn: ['sex', 'sexul', 'gender'] },
   { key: 'citizenship', group: 'identity', label: 'Citizenship · Cetățenie', syn: ['cetatenie', 'cetatenia', 'cetatean', 'nationalitate', 'nationalitatea', 'citizenship', 'nationality'] },
   { key: 'father_name', group: 'identity', label: "Father's first name · Tatăl", syn: ['fiul lui', 'fiica lui', 'numele tatalui', 'prenumele tatalui', 'tatal', 'father s name', 'fathers name', 'father name', 'father'] },
@@ -113,7 +114,7 @@ const AMBIG_CONTEXT = {
   ],
 };
 
-const OTHER_PERSON = / (parintilor|parintelui|tatalui|mamei|copilului|copiilor|copil|minorului|minorilor|sotului|sotiei|sotul|sotia|reprezentantului|reprezentant|reprezentata prin|reprezentat prin|imputernicitului|imputernicit|mandatarului|tutorelui|decedatului|defunctului|requester s|requester|spouse s|spouse|child s|children|parent s|parents|guardian s|guardian|agent s|employer s|beneficiarului|father s|mother s|father|mother|parent 1|parent 2|partner s|tatalui|mamei) /;
+const OTHER_PERSON = / (parintilor|parintelui|tatalui|mamei|copilului|copiilor|copil|minorului|minorilor|sotului|sotiei|sotul|sotia|reprezentantului|reprezentant|reprezentata prin|reprezentat prin|imputernicitului|imputernicit|mandatarului|tutorelui|decedatului|defunctului|requester s|requester|spouse s|spouse|child s|children|parent s|parents|guardian s|guardian|agent s|employer s|beneficiarului|father s|mother s|father|mother|parent 1|parent 2|partner s|parent|guardians|supervisor s|supervisor|emp|employer|referee|reference s|reference) /;
 
 // Build the matcher list for a vault (defaults + your custom fields)
 function compileFields(vault) {
@@ -189,6 +190,10 @@ function classify(label, compiled, opts = {}) {
     }
   }
   if (NOT_CURRENT.test(' ' + norm(label) + ' ')) { classify.lastGuess = false; return null; }
+  // money questions ("Starting salary", "Venit lunar") are never one of your details
+  if (/\b(salary|salariu|salariul|salariului|wage|wages|income|venit|venitul|venituri)\b/.test(norm(label)) && !/\b(iban|cont|account|bank|banca)\b/.test(norm(label))) { classify.lastGuess = false; return null; }
+  // a yes/no question about you ("Is your current name different to…", "Have you ever…") is not asking for the value
+  if (/^\s*(\d+\s*)?(is|are|do|does|did|have|has|were|was|will|can|would)\s+(you|your)\b/.test(norm(label))) { classify.lastGuess = false; return null; }
   const L = ' ' + norm(cleanLabel(label)) + ' ';
   if (!L.trim()) return null;
   const maxTail = opts.maxTail ?? 24;
@@ -221,6 +226,8 @@ function classify(label, compiled, opts = {}) {
     const at = L.lastIndexOf(' ' + best.syn + ' ');
     const before = ' ' + L.slice(Math.max(0, at - 25), at) + ' ';
     if ((OTHER_PERSON.test(after) || OTHER_PERSON.test(before)) && !/^(father_name|mother_name)$/.test(best.key)) return null;
+    // "Qualification name", "Name of campus": the name of a thing, not yours
+    if (/^(full_name|first_name|last_name|@nume)$/.test(best.key) && /\b(qualification|course|campus|location|company|business|employer|organisation|organization|institution|university|school|college|bank|street|building|programme|program|product|project|event|team|club|scheme|award|degree|subject|module|file|user)\s+name\b|\bname of (the |your )?(?!applicant|student|candidate|holder|account holder|declarant|signatory|person)\w+/.test(norm(label))) return null;
     // in Romanian "date" means data ("următoarele date"); as an English label it comes first ("Date:", "Date signed")
     if (best.syn === 'date' && L.trim().split(' ').indexOf('date') > 1) return null;
   }
@@ -253,7 +260,7 @@ function classify(label, compiled, opts = {}) {
   }
   if (pick) return pick;
   // "Date of loss", "Date of marriage": some other date, not today
-  if (best.key === '@date' && / date of (?!(application|signing|signature|completion|submission|request|declaration|filling)\b)\w+/.test(' ' + norm(label) + ' ')) return null;
+  if (best.key === '@date' && (/ date of (?!(application|signing|signature|completion|submission|request|declaration|filling)\b)\w+/.test(' ' + norm(label) + ' ') || / date (you|when|on which|that|the|from|to|started|ended|left|joined|of diploma|of graduation|of employment) /.test(' ' + norm(label) + ' '))) return null;
   if (best.key === '@date') return 'today';
   if (best.key === '@seria') return 'id_series';
   // "Telephone Number": the vague word lost its meaning, so the next best word decides

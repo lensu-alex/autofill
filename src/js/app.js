@@ -527,6 +527,12 @@ const App = {
       v = v.replace(/^(str(ada)?|bd|b-dul|bulevardul|sos(eaua)?|calea|aleea)\.?\s+/i, '');
     }
     if (!v) return null;
+    // "Name (Last, First, MI.)", "full name (surname first)": surname first, as asked
+    const vals = this.valuesFor(b.person);
+    if (b.key === 'full_name' && !((!b.person || b.person === 'me') && (this.vault.values.full_name || '').trim()) && vals.first_name && vals.last_name
+      && /\b(last|surname|family name)\s*,\s*(first|given)|surname first|last name first|\(\s*nume\s*,\s*prenume/i.test((b.labelText || '') + ' ' + (b.before || ''))) {
+      v = vals.last_name + ', ' + vals.first_name;
+    }
     // a drawn tick box: X in the one whose word matches
     if (b.mark) return optionMatches(b.option, v, b.key) ? { text: 'X' } : null;
     // "Banca ____" + "Banca Transilvania", "Facultății de ____" + "Facultatea de Matematică": don't repeat the word

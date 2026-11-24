@@ -244,8 +244,18 @@ function optionMatches(option, value, key) {
   if (key === 'gender' || canonGender(a) && canonGender(b)) return !!canonGender(a) && canonGender(a) === canonGender(b);
   return a.length >= 3 && a === b;
 }
+// "Under18" / "18to75" / "76Over", "sub 18 ani", "18-25": which range an age falls in
+function ageInOption(option, age) {
+  const o = norm(option).replace(/\s+/g, ' ');
+  let m;
+  if ((m = /\b(under|below|sub|less than|mai putin de)\s*(\d+)/.exec(o) || /^(under)(\d+)$/.exec(o.replace(/ /g, '')))) return age < +m[2];
+  if ((m = /(\d+)\s*(to|-|–|pana la)\s*(\d+)/.exec(o) || /^(\d+)(to)(\d+)$/.exec(o.replace(/ /g, '')))) return age >= +m[1] && age <= +m[3];
+  if ((m = /(\d+)\s*(\+|over|or over|and over|or older|plus|si peste)/.exec(o) || /^(over|peste)\s*(\d+)/.exec(o))) return age >= +(m[1].match(/\d/) ? m[1] : m[2]);
+  return false;
+}
 function bestOption(options, value, key) {
   if (!value) return null;
+  if (key === 'age' && /^\d+$/.test(String(value).trim())) return options.find((o) => ageInOption(o, +value)) || null;
   const b = norm(value);
   return options.find((o) => optionMatches(o, value, key))
     || options.find((o) => norm(o) === b)
@@ -391,12 +401,26 @@ async function processPdf(bytes, env, meta = {}) {
       let options = [];
       try { options = f.getOptions(); } catch { options = []; }
       const generic = isGeneric(name) || (options.length && options.every((o) => isGeneric(o)));
-      const key = generic ? null : (cls(name, false) || cls(left?.str) || cls(above?.str));
+      let key = generic ? null : (cls(name, false) || cls(left?.str) || cls(above?.str));
+      if (/age ?group|age ?range|age ?band|grupa de varsta/i.test(name) || (options.length >= 2 && options.filter((o) => /\d/.test(o)).length >= 2 && options.some((o) => /under|over|sub|peste|\d\s*(to|-)\s*\d/i.test(o)) && /age|v[aâ]rst/i.test((left?.str || '') + ' ' + (above?.str || '') + ' ' + name))) key = 'age';
+      // a yes/no question is not a place for a name or an address
+      else if (options.length && options.every((o) => /^(yes|no|da|nu|y|n|off|on|\d)$/i.test(o.trim()))) key = null;
       const optRects = type === 'radio' ? ws.map((x) => { const r = x.getRectangle(); return { x: r.x, y: r.y, w: r.width, h: r.height, page: findPage(x) }; }) : null;
       blanks.push({ ...base, options, optRects, key, before: (left?.str || above?.str || name).trim().slice(-40) + ' (' + options.slice(0, 4).join(' / ') + ')', canImage: false });
       continue;
     }
-    let key = type === 'sig' ? 'signature' : ((!isGeneric(name) && cls(name, false)) || cls(left?.str) || cls(above?.str));
+    // "DateDip", "DateFrom": a date of something else, not today; let the printed label decide
+    const nameUsable = !isGeneric(name) && !/^\s*date\s*(?!sign|today|complet|curent|current)[a-z]{3,}/i.test(name);
+    let key = type === 'sig' ? 'signature' : ((nameUsable && cls(name, false)) || cls(left?.str) || cls(above?.str));
+    if (type !== 'sig' && /\b(salary|salariu|salariul|wage|income|venit)\b/i.test(left?.str || above?.str || '')) { key = null; base.noSmart = true; }
+    // a name that says what the box is for, but nothing we keep: don't take the neighbour's label instead
+    if (type !== 'sig' && /(reason|comment|notes?|explain|details|previous|former|maiden|other|motiv|observatii)/i.test(name) && !cls(name, false)) { key = null; base.noSmart = true; }
+    // date boxes named DD / MM / YYYY: one part of a date (which date is decided by the label)
+    const dp = /(?:^|[\s_.-])(DD|ZZ|MM|LL|YYYY|YY|AAAA)\d*$/i.exec(f.getName().split('.').pop());
+    if (type === 'text' && dp) {
+      base.datePart = { DD: 'd', ZZ: 'd', MM: 'm', LL: 'm' }[dp[1].toUpperCase()] || 'y';
+      if (!/^(birth_date|today|id_issue_date|id_expiry_date)$/.test(key || '')) key = null;
+    }
     let existing = '';
     if (type === 'text') { try { existing = f.getText() || ''; } catch { existing = ''; } }
     if (existing.trim()) key = null;
@@ -433,8 +457,13 @@ async function processPdf(bytes, env, meta = {}) {
     while (j < texts.length && texts[j].key === texts[i].key && texts[j].page === texts[i].page && Math.abs(texts[j].rect.y - texts[i].rect.y) < 4) j++;
     const grp = texts.slice(i, j);
     if (grp.length === 3) {
+      grp.sort((a, b) => a.rect.x - b.rect.x); // boxes on one row can sit a fraction of a point apart
       const yearFirst = grp[0].maxLen === 4;
-      grp.forEach((b, k) => { b.datePart = (yearFirst ? 'ymd' : 'dmy')[k]; b.before += ' [' + { d: 'day', m: 'month', y: 'year' }[b.datePart] + ']'; });
+      // names like "dob - day" / "luna" say which part each box is
+      const named = (b) => { const n = (b.fieldName || '').split('.').pop(); return /(day|\bzi(ua)?\b|\bdd\b)\W*\d*$/i.test(n) ? 'd' : /(month|\bluna\b|\bmm\b)\W*\d*$/i.test(n) ? 'm' : /(year|\banul?\b|\byyyy\b)\W*\d*$/i.test(n) ? 'y' : null; };
+      const byName = grp.map(named);
+      const order = new Set(byName).size === 3 && byName.every(Boolean) ? byName : (yearFirst ? 'ymd' : 'dmy').split('');
+      grp.forEach((b, k) => { b.datePart = order[k]; b.before += ' [' + { d: 'day', m: 'month', y: 'year' }[b.datePart] + ']'; });
     }
     i = j;
   }
@@ -572,7 +601,7 @@ async function processPdf(bytes, env, meta = {}) {
           if (bottom2 != null && emptyRect(left + 1, bottom2 + 1, right - 1, bottom - 1)) cell = { x0: left, x1: right, y0: bottom2, y1: bottom };
         }
         if (!cell) continue;
-        if (cell.x1 - cell.x0 < 18 && cell.x1 > P.view[2] - 25) continue; // a thin strip at the page edge is a margin, not somewhere to write
+        if (cell.x1 - cell.x0 < 13 || (cell.x1 - cell.x0 < 18 && cell.x1 > P.view[2] - 25)) continue; // a thin strip at the page edge is a margin, not somewhere to write
         if (blanks.some((b) => b.page === pi && b.x >= cell.x0 - 2 && b.x <= cell.x1 && b.y >= cell.y0 - 2 && b.y <= cell.y1)) continue;
         if (inWidget(pi, cell.x0 + 2, cell.y0 + 2, cell.x1 - 2, cell.y1 - 2)) continue;
         // the form already has a fillable box for this label
@@ -683,6 +712,15 @@ async function processPdf(bytes, env, meta = {}) {
       // a label just left of the boxes ("CNP |_|_|…") beats the line above; a table cell holding the boxes gives its label too
       const above = textAbove(r), left = textLeft(r);
       const label = left || above || frameLabel;
+      // boxes drawn behind fillable fields: the fields are what gets filled, the row only names them
+      if (inWidget(pi, x0 + 2, r.bottom + 2, x1 - 2, r.top - 2)) {
+        const k = label && classify(label, env.compiled, { ...opts, maxTail: 30, window: label });
+        for (const b of blanks) {
+          if (b.kind === 'field' && b.page === pi && b.datePart && !b.key && k && /^(birth_date|today|id_issue_date|id_expiry_date)$/.test(k)
+            && b.rect.x >= x0 - 4 && b.rect.x <= x1 && b.rect.y + b.rect.h / 2 > r.bottom - 3 && b.rect.y + b.rect.h / 2 < r.top + 3) { b.key = k; b.before = label.slice(-40) + ' [' + { d: 'day', m: 'month', y: 'year' }[b.datePart] + ']'; b.labelText = label; }
+        }
+        continue;
+      }
       // rows under "Father's or Parent 1's full name" are about that parent, until the next block of the form
       if (prevRow && prevRow.bottom - r.top > 40) about = null;
       if (/\b(father|mother|parent [12]|tat[aă]l|mama)/i.test(label)) about = label;
