@@ -271,7 +271,9 @@ async function processDocx(bytes, env) {
     // Word form controls: content controls ("Click here to enter text") and old FORMTEXT fields
     const skip = new Set();
     blanks.push(...wordControls(doc, env, opts, where, imageAt, skip));
-    const paras = [...doc.getElementsByTagNameNS(NS.w, 'p')];
+    // text boxes are stored twice (new style + "Fallback" copy for old Word): fill the new one only
+    const MC = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+    const paras = [...doc.getElementsByTagNameNS(NS.w, 'p')].filter((p) => !closestNS(p, MC, 'Fallback'));
     blanks.push(...paragraphBlanks(paras, (p) => wSegs(p, skip), env, opts, where, imageAt,
       (p) => { const tc = closestNS(p, NS.w, 'tc'); return tc && labelCells.has(tc); }));
   }
@@ -279,6 +281,16 @@ async function processDocx(bytes, env) {
   return {
     blanks,
     async finish(sigBytes) {
+      // keep the old-Word copy of each text box the same as the filled one
+      const MC = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+      for (const part of parts) {
+        for (const ac of [...part.xml.getElementsByTagNameNS(MC, 'AlternateContent')]) {
+          const ch = kids(ac, MC, 'Choice')[0], fb = kids(ac, MC, 'Fallback')[0];
+          const a = ch && [...ch.getElementsByTagNameNS(NS.w, 'txbxContent')], b = fb && [...fb.getElementsByTagNameNS(NS.w, 'txbxContent')];
+          if (!a || !b || a.length !== b.length) continue;
+          a.forEach((src, i) => { const dst = b[i]; while (dst.firstChild) dst.removeChild(dst.firstChild); for (const c of src.childNodes) dst.appendChild(c.cloneNode(true)); });
+        }
+      }
       for (const part of parts) zip.file(part.name, serializeXml(part.xml));
       for (const [path, rels] of Object.entries(relsCache)) zip.file(path, serializeXml(rels));
       if (usedImage && sigBytes) {

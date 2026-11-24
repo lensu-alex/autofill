@@ -128,3 +128,11 @@ with zipfile.ZipFile(os.path.join(D, 'sheet.numbers'), 'w') as z:
     z.writestr('Index/Document.iwa', b'\x00')
     z.writestr('preview.jpg', buf.getvalue())
 print('tiff + numbers written')
+
+# --- Word with a text box (stored twice: wps text box + VML fallback)
+d = Document()
+d.add_paragraph('Formular cu casetă de text')
+tb = '''<w:r %s xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:v="urn:schemas-microsoft-com:vml"><mc:AlternateContent><mc:Choice Requires="wps"><w:drawing><wp:inline><wp:extent cx="3000000" cy="600000"/><wp:docPr id="50" name="TextBox 1"/><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="3000000" cy="600000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></wps:spPr><wps:txbx><w:txbxContent><w:p><w:r><w:t>Telefon: ______________</w:t></w:r></w:p></w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></mc:Choice><mc:Fallback><w:pict><v:rect style="width:236pt;height:47pt"><v:textbox><w:txbxContent><w:p><w:r><w:t>Telefon: ______________</w:t></w:r></w:p></w:txbxContent></v:textbox></v:rect></w:pict></mc:Fallback></mc:AlternateContent></w:r>''' % 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+d.add_paragraph()._p.append(parse_xml(tb))
+d.save(os.path.join(D, 'textbox.docx'))
+print('textbox written')
