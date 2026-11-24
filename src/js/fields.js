@@ -128,7 +128,7 @@ function compileFields(vault) {
 }
 
 // A light Romanian stemmer: "facultății" -> "facultat", "domiciliului" -> "domicili", "studenta" -> "student"
-const RO_SUFFIXES = ['urilor', 'ilor', 'elor', 'ului', 'iilor', 'atii', 'atea', 'ul', 'ua', 'lor', 'ii', 'ei', 'ea', 'ia', 'le', 'ie', 'a', 'e', 'i', 'u'];
+const RO_SUFFIXES = ['urilor', 'iilor', 'ilor', 'elor', 'ului', 'atii', 'atea', 'urile', 'uri', 'ul', 'ua', 'lor', 'iu', 'ii', 'ei', 'ea', 'ia', 'le', 'ie', 'a', 'e', 'i', 'u'];
 function stemWord(w) {
   if (w.length < 5 || /\d/.test(w)) return w;
   for (const suf of RO_SUFFIXES) if (w.endsWith(suf) && w.length - suf.length >= 4) return w.slice(0, -suf.length);
@@ -153,12 +153,14 @@ const RO_EN = {
   lucrare: 'paper', tema: 'topic', proiect: 'project', mentor: 'mentor', categorie: 'category', disciplina: 'subject', materie: 'subject',
   rezultat: 'result', punctaj: 'score', loc: 'place', nivel: 'level', experienta: 'experience', competente: 'skills', hobby: 'hobby',
   contact: 'contact', urgenta: 'emergency', persoana: 'person', tip: 'type', tipul: 'type', student: 'student', coordonatorul: 'coordinator',
-  marca: 'brand', model: 'model', culoare: 'colour', inregistrare: 'registration', echipament: 'equipment', masura: 'size', de: 'of', si: 'and', al: 'of', a: 'of',
+  marca: 'brand', model: 'model', culoare: 'colour', tricou: 't shirt', bluza: 'shirt', pantof: 'shoe', marimea: 'size', inregistrare: 'registration', echipament: 'equipment', masura: 'size', de: 'of', si: 'and', al: 'of', a: 'of',
 };
 const EN_RO = Object.fromEntries(Object.entries(RO_EN).filter(([k]) => !['de', 'si', 'al', 'a'].includes(k)).map(([r, e]) => [e, r.replace('_', ' ')]));
+let RO_EN_STEM = null;
 function translatePhrase(p) {
+  if (!RO_EN_STEM) RO_EN_STEM = Object.fromEntries(Object.entries(RO_EN).map(([k, v]) => [stemWord(k), v]));
   const words = p.split(' ').filter(Boolean);
-  const one = (w) => RO_EN[w] || RO_EN[stemWord(w)] || EN_RO[w];
+  const one = (w) => RO_EN[w] || RO_EN_STEM[stemWord(w)] || EN_RO[w];
   const out = words.map(one);
   return out.every(Boolean) ? out.join(' ').replace(/_/g, ' ') : null;
 }

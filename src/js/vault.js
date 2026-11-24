@@ -48,6 +48,7 @@ async function openVault(text, password) {
   data.values = data.values || {};
   data.custom = data.custom || [];
   data.people = data.people || [];
+  data.answers = data.answers || [];
   return { data, k: { key, salt, iter: box.kdf.iter } };
 }
 

@@ -125,3 +125,4 @@ button.danger { color: var(--bad); }
 
 .toolbar .val-wrap { width: 190px; }
 .toolbar .val-edit { font-size: 12px; padding: 4px 6px; }
+.val-edit.remembered { border-style: solid; border-color: #9ccfb0; background: #f3fbf6; }

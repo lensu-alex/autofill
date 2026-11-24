@@ -141,7 +141,12 @@ const App = {
     const box = $('#learned-list');
     box.textContent = '';
     const L = this.vault.learned || [];
-    if (!L.length) { box.append(h('span', { class: 'muted', text: 'Nothing yet.' })); return; }
+    const A = this.vault.answers || [];
+    if (!L.length && !A.length) { box.append(h('span', { class: 'muted', text: 'Nothing yet.' })); return; }
+    A.slice().reverse().forEach((a) => {
+      box.append(h('div', { class: 'learned' }, h('span', { text: `"${a.phrase}" → ${fieldLabel(a.key, this.vault)}: "${a.value || '(leave empty)'}"` }),
+        h('button', { class: 'mini danger', onclick: () => { this.vault.answers = A.filter((x) => x !== a); this.persist(); this.buildLearned(); } }, 'Forget')));
+    });
     L.slice().reverse().forEach((l) => {
       box.append(h('div', { class: 'learned' }, h('span', { text: `"${l.phrase}" → ${fieldLabel(l.key, this.vault)}` }),
         h('button', { class: 'mini danger', onclick: () => { this.vault.learned = L.filter((x) => x !== l); this.refreshValues(); this.markDirty(); this.saveVault(); this.buildLearned(); } }, 'Forget')));
@@ -496,6 +501,8 @@ const App = {
       if (!b.override.trim()) return null;
       return b.kind === 'field' && b.fieldType !== 'text' && b.fieldType !== 'sig' ? fieldValue(b, b.override) : { text: b.override };
     }
+    const rem = b.key && b.key[0] !== '_' ? this.rememberedFor(b) : null;
+    if (rem != null) return rem ? (b.kind === 'field' && b.fieldType !== 'text' && b.fieldType !== 'sig' ? fieldValue(b, rem) : { text: rem }) : null;
     return this.autoValue(b);
   },
 
@@ -567,10 +574,12 @@ const App = {
 
   // A text box showing exactly what will be written; typing changes it, ↺ goes back to automatic
   valueEditor(b, onChange) {
-    const auto = this.autoValue(b);
+    const auto = this.valueOf({ ...b, override: null });
     const shown = b.override != null ? b.override : auto && auto.text != null && !auto.image ? auto.text : '';
+    const remembered = b.override == null && b.key && this.rememberedFor(b) != null;
     const inp = h('input', { class: 'val-edit' + (b.override != null ? ' edited' : ''), value: shown, placeholder: b.key ? 'empty: type to fill in' : 'type what goes here', spellcheck: false });
-    const reset = h('button', { class: 'mini reset', title: 'Back to the automatic value', hidden: b.override == null }, '↺');
+    const reset = h('button', { class: 'mini reset', title: remembered ? 'Remembered from before: click to use the normal value again' : 'Back to the automatic value', hidden: b.override == null && !remembered }, '↺');
+    if (remembered) inp.classList.add('remembered');
     inp.addEventListener('input', () => {
       b.override = inp.value;
       inp.classList.add('edited'); reset.hidden = false;
@@ -578,9 +587,19 @@ const App = {
       onChange && onChange();
     });
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+    // when you leave the box, remember the answer for next time
+    inp.addEventListener('change', () => this.rememberEdit(b));
     reset.addEventListener('click', (e) => {
       e.stopPropagation();
       b.override = null;
+      // also forget an answer remembered for this wording
+      if (this.rememberedFor(b) != null) {
+        const phrase = learnPhrase(String(b.labelText || b.before || '').split(/_{3,}|\.{4,}|\u2026|\t|\n/).pop().replace(/\([^)]*\)/g, ' '));
+        const st = stemPhrase(phrase);
+        this.vault.answers = (this.vault.answers || []).filter((a) => !(a.key === b.key && (a.phrase === phrase || stemPhrase(a.phrase) === st)));
+        this.persist();
+        inp.classList.remove('remembered');
+      }
       const a = this.autoValue(b);
       inp.value = a && a.text != null && !a.image ? a.text : '';
       inp.classList.remove('edited'); reset.hidden = true;
@@ -609,6 +628,61 @@ const App = {
   },
 
   // Remember "this wording means that field" for next time (stored encrypted in the vault)
+  persist() {
+    this.refreshValues();
+    if (this.settings().remember) this.saveVault().catch(() => {});
+    else this.markDirty();
+  },
+
+  // You typed something in a blank: keep it for similar blanks in future documents.
+  // - a blank it didn't know -> a new extra field named after the form's label
+  // - a blank it filled differently -> your version, for this wording
+  rememberEdit(b) {
+    if (b.override == null) return;
+    const NO_MEMORY = /^(today|today_day|today_month|today_year|academic_year|academic_year_start|academic_year_end|signature|age|__tick)$/;
+    if (b.key && NO_MEMORY.test(b.key)) return;
+    const raw = String(b.labelText || b.before || '').split(/_{3,}|\.{4,}|\u2026|\t|\n/).pop().replace(/\([^)]*\)/g, ' ').replace(/[\s:;,.\-–]+$/, '').trim();
+    const phrase = learnPhrase(raw);
+    if (phrase.replace(/ /g, '').length < 3) return;
+    const value = b.override.trim();
+    if (!b.key || b.key === '__text') {
+      if (!value) return;
+      // reuse an extra field with the same name, or make one
+      let c = this.vault.custom.find((x) => stemPhrase(norm(x.label)) === stemPhrase(phrase));
+      const label = raw.split(/\s+/).slice(-5).join(' ').replace(/^[a-zăâîșț]/, (m) => m.toUpperCase());
+      if (!c) { c = { key: 'custom_' + Math.random().toString(36).slice(2, 8), label, value, aliases: '' }; this.vault.custom.push(c); }
+      else c.value = value;
+      b.key = c.key; b.override = null;
+      this.persist();
+      this.buildCustom();
+      toast(`Saved "${label}" to My information (extra fields) for next time`, 'good', 4000);
+    } else {
+      const A = (this.vault.answers = this.vault.answers || []);
+      const i = A.findIndex((x) => x.phrase === phrase && x.key === b.key);
+      if (i >= 0) A.splice(i, 1);
+      const auto = this.autoValue({ ...b, override: null, remembered: null });
+      if (auto && auto.text === value) { this.persist(); return; } // typed back the normal value: forget the special one
+      A.push({ phrase, key: b.key, value });
+      if (A.length > 500) A.shift();
+      this.persist();
+      toast('Remembered for similar forms', 'good', 2500);
+    }
+    this.renderList();
+  },
+
+  // Answers you gave earlier for this wording (exact words or the same word stems)
+  rememberedFor(b) {
+    const A = this.vault.answers || [];
+    if (!A.length || !b.key) return null;
+    const phrase = learnPhrase(String(b.labelText || b.before || '').split(/_{3,}|\.{4,}|\u2026|\t|\n/).pop().replace(/\([^)]*\)/g, ' '));
+    if (!phrase) return null;
+    const st = stemPhrase(phrase);
+    // same words, same stems, or every word has a close partner ("anul de studiu" ~ "anul de studii")
+    const hit = A.slice().reverse().find((a) => a.key === b.key && (a.phrase === phrase || stemPhrase(a.phrase) === st
+      || (typeof coverage === 'function' && coverage(a.phrase, phrase) >= 0.99)));
+    return hit ? hit.value : null;
+  },
+
   learn(b, key) {
     const phrase = learnPhrase(b.labelText || b.before);
     if (phrase.replace(/ /g, '').length < 3) return;

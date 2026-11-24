@@ -31,7 +31,7 @@ Fills any document with your personal information and signature, from an encrypt
 1. **Rules**: Romanian and English wording (`src/js/fields.js`), with context. `nr.` after `seria` is the ID number, after `str.` the street number; `ziua/luna/anul` after `născut` are birth date parts; "(cu majuscule)" gives CAPITALS; sections like "DATE PRIVIND COPIII MINORI" or "Requester's name" are about someone else and are left empty.
 2. **Similarity** (`similarity.js`): letter-trigram TF-IDF against many phrasings (RO/EN/FR/DE/IT/ES) for typos, scan misreads and word endings.
 3. **Smart matching** (optional, `smart.js` + `autofill-smart.js`): paraphrase-multilingual-MiniLM-L12-v2 embeddings for question-style labels ("Where do you live?"). Only trusted when one field clearly wins.
-4. **What you teach it**: when you correct a blank, the words before it are remembered (encrypted, in the vault).
+4. **What you teach it**: when you pick another field for a blank, that wording is remembered. When you *type* an answer, it is saved automatically: for a question it didn't know, as a new extra field named after the label (so similar wording, word endings and the English/Romanian version find it next time); for a blank it filled differently, as your preferred answer for that wording. All of it is stored encrypted in the vault and listed under Settings → What it learned from you.
 
 Guesses are marked "≈ please check" in the list.
 
