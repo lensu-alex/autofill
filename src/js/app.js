@@ -11,7 +11,18 @@ const OFFICE = {
 };
 const IMAGES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', tif: 'image/tiff', tiff: 'image/tiff', avif: 'image/avif' };
 const APPLE = { pages: 'Pages', numbers: 'Numbers', key: 'Keynote' };
-const OLD_FORMATS = { xls: 'Excel', ppt: 'PowerPoint' };
+const OLD_FORMATS = { xls: 'Excel', ppt: 'PowerPoint' }; // the Mac app converts these through Numbers/Keynote
+
+// Inside the Mac app: Pages/Numbers/Keynote convert files for us (see app/main.swift)
+const Native = {
+  ok() { return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native); },
+  async convert(bytes, name, to) {
+    const r = await window.webkit.messageHandlers.native.postMessage({ op: 'convert', name, data: bytesToB64(bytes), to });
+    return b64ToBytes(r.data);
+  },
+};
+const NATIVE_TO = { pages: 'docx', numbers: 'xlsx', key: 'pptx', doc: 'docx', xls: 'xlsx', ppt: 'pptx' };
+const NATIVE_BACK = { pages: 'pages', numbers: 'numbers', key: 'key' };
 
 const App = {
   vault: null, k: null, pendingVaultText: null, dirty: false,
@@ -277,7 +288,15 @@ const App = {
   async loadSession(file, env) {
     let ext = fileExt(file.name);
     let bytes = new Uint8Array(await file.arrayBuffer());
-    let sess, notice = '';
+    let sess, notice = '', nativeBack = null;
+    if (Native.ok() && NATIVE_TO[ext]) {
+      try {
+        env.progress && env.progress(`Asking ${{ pages: 'Pages', numbers: 'Numbers', key: 'Keynote', doc: 'Pages', xls: 'Numbers', ppt: 'Keynote' }[ext]} to open it…`);
+        bytes = await Native.convert(bytes, file.name, NATIVE_TO[ext]);
+        nativeBack = NATIVE_BACK[ext] || null;
+        ext = NATIVE_TO[ext];
+      } catch (e) { console.warn('native conversion failed', e); notice = 'Could not convert with the Apple app (' + (e.message || e) + '). '; }
+    }
     if (ext === 'doc' || ext === 'dot') {
       bytes = await docToDocx(bytes);
       ext = 'docx';
@@ -302,7 +321,7 @@ const App = {
       else if (res.ocrUsed) notice = (notice ? notice + ' ' : '') + 'This is a scan/photo: its text was read automatically, so check that everything sits in the right place (drag to adjust, click the page to add more).';
     } else if (OFFICE[ext]) {
       const res = await OFFICE[ext](bytes, env, ext);
-      sess = { type: 'office', name: baseName(file.name) + '.' + ext, ext, proc: OFFICE[ext], bytes, blanks: res.blanks };
+      sess = { type: 'office', name: baseName(file.name) + '.' + ext, ext, proc: OFFICE[ext], bytes, blanks: res.blanks, nativeBack };
     } else {
       throw new Error(`Can't fill .${ext || '?'} files yet. Supported: PDF, Word (.docx/.doc), Pages, OpenDocument, Excel, PowerPoint, pictures, HTML and text.`);
     }
@@ -505,7 +524,15 @@ const App = {
       const val = this.valueOf(s.blanks[i]);
       if (val) fresh.blanks[i].apply(val);
     }
-    return { blob: await fresh.finish(sigBytes), name: baseName(s.name) + '-filled.' + s.ext };
+    const blob = await fresh.finish(sigBytes);
+    if (s.nativeBack && Native.ok()) {
+      // back to the Apple format it came in
+      try {
+        const back = await Native.convert(new Uint8Array(await blob.arrayBuffer()), 'filled.' + s.ext, s.nativeBack);
+        return { blob: new Blob([back]), name: baseName(s.name) + '-filled.' + s.nativeBack };
+      } catch (e) { toast('Saved as .' + s.ext + ' (converting back failed: ' + (e.message || e) + ')', 'info', 6000); }
+    }
+    return { blob, name: baseName(s.name) + '-filled.' + s.ext };
   },
 
   async saveDoc(asPng) {
