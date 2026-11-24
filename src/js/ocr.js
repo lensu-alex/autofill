@@ -41,28 +41,69 @@ function cleanScan(canvas) {
   const ctx = canvas.getContext('2d');
   const img = ctx.getImageData(0, 0, W, H);
   const d = img.data;
-  const dark = new Uint8Array(W * H);
-  for (let i = 0, p = 0; p < W * H; i += 4, p++) dark[p] = d[i] + d[i + 1] + d[i + 2] < 360 ? 1 : 0;
+  // two thresholds: lines in scans are often thin and grey, text dots are solid
+  const dark = new Uint8Array(W * H), ink = new Uint8Array(W * H);
+  for (let i = 0, p = 0; p < W * H; i += 4, p++) { const v = d[i] + d[i + 1] + d[i + 2]; dark[p] = v < 500 ? 1 : 0; ink[p] = v < 360 ? 1 : 0; }
   const found = [];
 
   // 1) solid horizontal runs
   const minRun = Math.round(W * 0.045);
-  const runs = [];
+  const runs = [], shorts = [];
   for (let y = 0; y < H; y++) {
     let start = -1;
     for (let x = 0; x <= W; x++) {
       const k = x < W && dark[y * W + x];
       if (k && start < 0) start = x;
-      else if (!k && start >= 0) { if (x - start >= minRun) runs.push({ x0: start, x1: x, y }); start = -1; }
+      else if (!k && start >= 0) { if (x - start >= minRun) runs.push({ x0: start, x1: x, y }); else if (x - start >= W * 0.008) shorts.push({ x0: start, x1: x, y }); start = -1; }
     }
   }
+  // join runs on touching rows into lines; a slanted line spans many rows but stays thin in each column
   const solid = [];
+  let active = [];
   for (const r of runs) {
-    const l = solid.find((q) => r.y - q.y1 <= 1 && r.x0 < q.x1 && r.x1 > q.x0);
-    if (l) { l.y1 = r.y; l.x0 = Math.min(l.x0, r.x0); l.x1 = Math.max(l.x1, r.x1); }
-    else solid.push({ x0: r.x0, x1: r.x1, y0: r.y, y1: r.y });
+    let comp = null;
+    for (const c of active) {
+      if (c.lastY < r.y - 1) continue;
+      if (c.last.some((q) => q.x0 <= r.x1 && q.x1 >= r.x0)) { comp = c; break; }
+    }
+    if (!comp) { comp = { runs: [], last: [], lastY: r.y, cur: [] }; solid.push(comp); active.push(comp); }
+    if (comp.lastY !== r.y) { comp.last = comp.cur.length && comp.curY === r.y - 1 ? comp.cur : comp.last; comp.cur = []; }
+    comp.runs.push(r); comp.cur.push(r); comp.curY = r.y; comp.lastY = r.y;
+    if (comp.last.length === 0) comp.last = [r];
+    if (r.y % 64 === 0) active = active.filter((c) => c.lastY >= r.y - 2);
   }
-  for (const l of solid) if (l.y1 - l.y0 <= Math.max(6, W / 300)) found.push(l);
+  for (const c of solid) {
+    const x0 = Math.min(...c.runs.map((r) => r.x0)), x1 = Math.max(...c.runs.map((r) => r.x1));
+    const cov = new Uint16Array(x1 - x0 + 1);
+    for (const r of c.runs) for (let x = r.x0; x < r.x1; x++) cov[x - x0]++;
+    const nz = [...cov].filter((v) => v).sort((a, b) => a - b);
+    c.x0 = x0; c.x1 = x1; c.thick = nz[nz.length >> 1] || 0;
+    // the line's height where its left end is (what text sits on)
+    const ys = c.runs.filter((r) => r.x0 <= x0 + (x1 - x0) * 0.25);
+    c.y0 = Math.min(...(ys.length ? ys : c.runs).map((r) => r.y));
+    c.y1 = Math.max(...(ys.length ? ys : c.runs).map((r) => r.y));
+  }
+  for (const l of solid) {
+    if (l.thick > Math.max(8, W / 200) || l.x1 - l.x0 < minRun) continue;
+    // "|__|__|__|": bars standing on the line at even steps -> one box per character
+    if (l.x1 - l.x0 < W * 0.45) {
+      const bars = [];
+      for (let x = l.x0; x <= l.x1; x++) {
+        let hgt = 0;
+        for (let y = l.y0 - 1; y > Math.max(0, l.y0 - W * 0.03) && dark[y * W + x]; y--) hgt++;
+        if (hgt >= W * 0.006) { const last = bars[bars.length - 1]; if (last && x - last.x1 <= 2) last.x1 = x; else bars.push({ x0: x, x1: x }); }
+      }
+      if (bars.length >= 6) {
+        const steps = bars.slice(1).map((b, i) => (b.x0 + b.x1) / 2 - (bars[i].x0 + bars[i].x1) / 2);
+        const avg = steps.reduce((a, b) => a + b, 0) / steps.length;
+        if (steps.every((st) => Math.abs(st - avg) < avg * 0.3)) {
+          l.cells = bars.slice(1).map((b, i) => [bars[i].x1 + 1, b.x0 - 1]);
+          l.bars = bars;
+        }
+      }
+    }
+    found.push(l);
+  }
 
   // 2) dotted lines: rows of small blobs at the same height
   const lab = new Int32Array(W * H);
@@ -71,7 +112,7 @@ function cleanScan(canvas) {
   let next = 1;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const p = y * W + x;
-    if (!dark[p]) continue;
+    if (!ink[p]) continue;
     const a = x > 0 ? lab[p - 1] : 0, b = y > 0 ? lab[p - W] : 0;
     if (a && b) { const ra = find(a), rb = find(b); lab[p] = Math.min(ra, rb); if (ra !== rb) parent[Math.max(ra, rb)] = Math.min(ra, rb); }
     else if (a || b) lab[p] = a || b;
@@ -127,9 +168,88 @@ function cleanScan(canvas) {
     }
   }
 
+  // 3) rows of short underlines side by side: one box per character ("|__|__|__|" for a CNP)
+  const shortRuns = shorts;
+  const segs = [];
+  for (const r of shortRuns.sort((a, b) => a.y - b.y || a.x0 - b.x0)) {
+    const sgm = segs.find((q) => r.y - q.y1 <= 1 && Math.abs(r.x0 - q.x0) < 3);
+    if (sgm) sgm.y1 = r.y; else segs.push({ x0: r.x0, x1: r.x1, y0: r.y, y1: r.y });
+  }
+  // a box underline is thin and has empty paper above it (text has letters there)
+  const emptyAbove = (g) => {
+    let darkPx = 0, all = 0;
+    const top = Math.max(0, Math.round(g.y0 - W * 0.012)), x0 = g.x0 + 3, x1 = g.x1 - 3;
+    for (let y = top; y < g.y0 - 2; y++) for (let x = x0; x < x1; x += 2) { all++; darkPx += ink[y * W + x]; }
+    return all > 0 && darkPx / all < 0.04;
+  };
+  const allSegs = segs.map((g) => ({ ...g, thin: g.y1 - g.y0 <= Math.max(3, W / 500), empty: emptyAbove(g) }));
+  for (let i = segs.length - 1; i >= 0; i--) if (segs[i].y1 - segs[i].y0 > Math.max(3, W / 500) || !emptyAbove(segs[i])) segs.splice(i, 1);
+  // pieces of the same underline (scan noise breaks them) join up
+  segs.sort((a, b) => a.x0 - b.x0);
+  const joined = [];
+  for (const g of segs) {
+    const j = joined.find((q) => Math.abs(q.y0 - g.y0) <= 3 && g.x0 <= q.x1 + 2 && g.x1 >= q.x0 - 2);
+    if (j) { j.x0 = Math.min(j.x0, g.x0); j.x1 = Math.max(j.x1, g.x1); j.y0 = Math.min(j.y0, g.y0); j.y1 = Math.max(j.y1, g.y1); } else joined.push({ ...g });
+  }
+  joined.sort((a, b) => a.x0 - b.x0);
+  const usedSeg = new Set();
+  for (let i = 0; i < joined.length; i++) {
+    if (usedSeg.has(i)) continue;
+    const row = [joined[i]];
+    let maxLen = joined[i].x1 - joined[i].x0;
+    for (let j = i + 1; j < joined.length; j++) {
+      const a = row[row.length - 1], c = joined[j];
+      if (usedSeg.has(j) || Math.abs(c.y0 - a.y0) > 4) continue;
+      if (c.x0 - a.x1 > Math.max(maxLen * 0.9, W * 0.004)) break;
+      if (c.x1 - c.x0 < maxLen * 0.3) continue;
+      row.push(c); usedSeg.add(j);
+      maxLen = Math.max(maxLen, c.x1 - c.x0);
+    }
+    if (row.length >= 5) {
+      usedSeg.add(i);
+      // evenly spaced boxes from the row's pitch
+      const starts = row.map((q) => q.x0);
+      const steps = starts.slice(1).map((x, k) => x - starts[k]).sort((p, q) => p - q);
+      const pitch = steps[steps.length >> 1];
+      const x0 = row[0].x0, x1 = row[row.length - 1].x1;
+      const n = Math.max(row.length, Math.round((x1 - x0) / pitch));
+      const cells = [];
+      for (let k = 0; k < n; k++) cells.push([x0 + k * pitch, x0 + k * pitch + pitch * 0.85]);
+      found.push({ x0, x1, y0: Math.min(...row.map((q) => q.y0)), y1: Math.max(...row.map((q) => q.y1)), cells });
+    }
+  }
+
+  // 4) vertical lines (table borders)
+  const vlines = [];
+  const minV = Math.round(H * 0.03);
+  for (let x = 0; x < W; x++) {
+    let start = -1;
+    for (let y = 0; y <= H; y++) {
+      const k = y < H && dark[y * W + x];
+      if (k && start < 0) start = y;
+      else if (!k && start >= 0) {
+        if (y - start >= minV) {
+          const l = vlines.find((q) => x - q.x1 <= 1 && start < q.y1 && y > q.y0);
+          if (l) { l.x1 = x; l.y0 = Math.min(l.y0, start); l.y1 = Math.max(l.y1, y); l.area += y - start; l.sx += x * (y - start); }
+          else vlines.push({ x0: x, x1: x, y0: start, y1: y, area: y - start, sx: x * (y - start) });
+        }
+        start = -1;
+      }
+    }
+  }
+
   // erase them from the picture before reading the text
   ctx.fillStyle = '#fff';
-  for (const f of found) ctx.fillRect(f.x0 - 1, f.y0 - 2, f.x1 - f.x0 + 3, f.y1 - f.y0 + 5);
+  for (const f of found) {
+    if (f.runs) for (const r of f.runs) ctx.fillRect(r.x0 - 1, r.y - 2, r.x1 - r.x0 + 3, 5);
+    else ctx.fillRect(f.x0 - 1, f.y0 - 2, f.x1 - f.x0 + 3, f.y1 - f.y0 + 5);
+    for (const b of f.bars || []) ctx.fillRect(b.x0 - 1, f.y0 - W * 0.03, b.x1 - b.x0 + 3, W * 0.03);
+  }
+  // thickness = dark area / length (works for slightly slanted lines too)
+  const vert = vlines.filter((l) => l.area / Math.max(1, l.y1 - l.y0) <= Math.max(8, W / 200));
+  for (const l of vert) { l.xc = l.sx / l.area; ctx.fillRect(l.x0 - 1, l.y0, l.x1 - l.x0 + 3, l.y1 - l.y0); }
+  found.vertical = vert;
+  found.debugSegs = allSegs;
   return found;
 }
 
@@ -144,13 +264,20 @@ async function ocrPage(pg, progress) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
   await pg.render({ canvasContext: ctx, viewport: vp }).promise;
   const rules = [];
-  for (const f of cleanScan(c).sort((a, b) => a.x0 - b.x0)) {
+  const found = cleanScan(c);
+  const vrules = found.vertical.map((l) => {
+    const [x, ya] = vp.convertToPdfPoint(l.xc, l.y0);
+    const [, yb] = vp.convertToPdfPoint(l.xc, l.y1);
+    return { x, y0: Math.min(ya, yb), y1: Math.max(ya, yb) };
+  });
+  for (const f of found.sort((a, b) => a.x0 - b.x0)) {
     const [x0, y] = vp.convertToPdfPoint(f.x0, f.y1);
     const [x1] = vp.convertToPdfPoint(f.x1, f.y1);
     const r = { x0: Math.min(x0, x1), x1: Math.max(x0, x1), y };
+    if (f.cells) { r.cells = f.cells.map(([a, z]) => [vp.convertToPdfPoint(a, f.y1)[0], vp.convertToPdfPoint(z, f.y1)[0]]); rules.push(r); continue; }
     // pieces of the same line join up
     const m = rules.find((q) => Math.abs(q.y - r.y) < 3 && r.x0 - q.x1 < 12 && r.x1 > q.x0 - 12);
-    if (m) { m.x0 = Math.min(m.x0, r.x0); m.x1 = Math.max(m.x1, r.x1); m.y = Math.min(m.y, r.y); } else rules.push(r);
+    if (m && !m.cells) { m.x0 = Math.min(m.x0, r.x0); m.x1 = Math.max(m.x1, r.x1); m.y = Math.min(m.y, r.y); } else rules.push(r);
   }
   const worker = await getOcr(progress);
   progress && progress('reading text', 0);
@@ -174,9 +301,19 @@ async function ocrPage(pg, progress) {
       items.push({ str, x: Math.min(x0, x1), y, w: Math.abs(x1 - x0), size: clamp(size, 5, 40), family: 'sans-serif', widths: null });
     }
   }
+  // the page may be a little tilted: measure it from the text baselines and give every word a
+  // "straightened" height (gy) used to group words into lines
+  const slopes = [];
+  for (const b of data.blocks || []) for (const p of b.paragraphs) for (const ln of p.lines) {
+    const bl = ln.baseline;
+    if (bl && bl.x1 - bl.x0 > c.width * 0.15) slopes.push((bl.y1 - bl.y0) / (bl.x1 - bl.x0));
+  }
+  slopes.sort((a, b) => a - b);
+  const skew = slopes.length ? -slopes[slopes.length >> 1] : 0; // pdf y goes up
+  for (const it of items) it.gy = it.y - skew * (it.x + it.w / 2);
   // one size per page is steadier than per word
   const sizes = items.map((i) => i.size).sort((a, b) => a - b);
   const med = sizes[sizes.length >> 1];
   if (med) for (const it of items) if (it.size < med * 1.3) it.size = med;
-  return { items, rules };
+  return { items, rules, vrules };
 }

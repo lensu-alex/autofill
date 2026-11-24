@@ -197,9 +197,10 @@ function horizontal(t) { return Math.abs(t[1]) < 0.01 && Math.abs(t[2]) < 0.01; 
 
 function buildLines(items) {
   const lines = [];
-  for (const it of [...items].sort((a, b) => b.y - a.y || a.x - b.x)) {
-    const L = lines.find((l) => Math.abs(l.y - it.y) <= Math.max(1.5, 0.35 * Math.min(l.size, it.size)));
-    if (L) L.items.push(it); else lines.push({ y: it.y, size: it.size, items: [it] });
+  const gy = (it) => it.gy ?? it.y; // straightened height for tilted scans
+  for (const it of [...items].sort((a, b) => gy(b) - gy(a) || a.x - b.x)) {
+    const L = lines.find((l) => Math.abs(l.gy - gy(it)) <= Math.max(1.5, 0.35 * Math.min(l.size, it.size)));
+    if (L) L.items.push(it); else lines.push({ y: it.y, gy: gy(it), size: it.size, items: [it] });
   }
   for (const l of lines) {
     l.items.sort((a, b) => a.x - b.x);
@@ -209,17 +210,24 @@ function buildLines(items) {
     for (const it of l.items) {
       if (prevEnd != null) {
         const gap = it.x - prevEnd;
-        if (gap > 2.2 * size) { str += '\t'; chars.push({ x0: prevEnd, x1: it.x }); }
-        else if (gap > 0.15 * size && !/\s$/.test(str) && !/^\s/.test(it.str)) { str += ' '; chars.push({ x0: prevEnd, x1: it.x }); }
+        if (gap > 2.2 * size) { str += '\t'; chars.push({ x0: prevEnd, x1: it.x, y: it.y }); }
+        else if (gap > 0.15 * size && !/\s$/.test(str) && !/^\s/.test(it.str)) { str += ' '; chars.push({ x0: prevEnd, x1: it.x, y: it.y }); }
       }
       const e = charEdges(it.str, it.w, it.family, it.widths);
-      for (let k = 0; k < it.str.length; k++) chars.push({ x0: it.x + e[k], x1: it.x + e[k + 1] });
+      for (let k = 0; k < it.str.length; k++) chars.push({ x0: it.x + e[k], x1: it.x + e[k + 1], y: it.y });
       str += it.str;
       prevEnd = Math.max(prevEnd ?? -1e9, it.x + it.w);
     }
     l.str = str; l.chars = chars; l.x0 = l.items[0].x;
   }
-  return lines.sort((a, b) => b.y - a.y);
+  return lines.sort((a, b) => b.gy - a.gy);
+}
+
+// Height of a text line near x (lines in tilted scans are not level)
+function lineYAt(l, x) {
+  let best = l.y, d = 1e9;
+  for (const c of l.chars) { const dd = Math.abs((c.x0 + c.x1) / 2 - x); if (dd < d && c.y != null) { d = dd; best = c.y; } }
+  return best;
 }
 
 function splitFieldName(n) {
@@ -290,7 +298,8 @@ async function processPdf(bytes, env, meta = {}) {
       try {
         env.progress && env.progress(`Reading page ${i + 1} of ${js.numPages}…`);
         const r = await ocrPage(pg, (st, p) => env.progress && env.progress(`Reading page ${i + 1} of ${js.numPages}: ${st}${p ? ' ' + Math.round(p * 100) + '%' : ''}`));
-        items = r.items; rules = rules.concat(r.rules); ocr = true;
+        const vert = (rules.vertical || []).concat(r.vrules || []);
+        items = r.items; rules = rules.concat(r.rules); rules.vertical = vert; ocr = true;
       } catch (e) { console.warn('OCR failed', e); }
     }
     pages.push({ pg, view: pg.view, items, lines: buildLines(items), rules, vrules: rules.vertical || [], ocr });
@@ -439,6 +448,7 @@ async function processPdf(bytes, env, meta = {}) {
         const key = assignBlank(b, env.compiled, opts);
         const optional = b.kind === 'insert' && !key;
         const size = clamp(l.size, 7, 12);
+        const ly = (l.chars[b.kind === 'insert' ? b.start - 1 : b.start] || {}).y ?? l.y;
         let x, maxW, cover = null;
         if (b.kind === 'insert') {
           x = l.chars[b.start - 1].x1 + 0.35 * size;
@@ -449,11 +459,11 @@ async function processPdf(bytes, env, meta = {}) {
         } else {
           const x0 = l.chars[b.start].x0, x1 = l.chars[b.end - 1].x1;
           x = x0 + 1; maxW = x1 - x0 + 6;
-          cover = { x: x0 - 0.5, y: l.y - 0.32 * l.size, w: x1 - x0 + 1, h: l.size * 1.15 };
+          cover = { x: x0 - 0.5, y: ly - 0.32 * l.size, w: x1 - x0 + 1, h: l.size * 1.15 };
         }
         if (b.kind === 'boxes') { cover = null; x = l.chars[b.start].x0; }
-        if (inWidget(pi, x, l.y - 2, x + Math.max(20, Math.min(maxW, 160)), l.y + size)) continue;
-        const it = { kind: 'text', optional, section, page: pi, key, x, y: l.y + (cover ? 0 : 0.1 * size), size, maxW, cover,
+        if (inWidget(pi, x, ly - 2, x + Math.max(20, Math.min(maxW, 160)), ly + size)) continue;
+        const it = { kind: 'text', optional, section, page: pi, key, x, y: ly + (cover ? 0 : 0.1 * size), size, maxW, cover,
           ...contextSnippet(b), where: 'page ' + (pi + 1), canImage: true };
         if (b.kind === 'boxes') { it.boxes = b.cells.map(([a, z]) => ({ x0: l.chars[a].x0, x1: l.chars[Math.max(a, z - 1)].x1 })); it.maxW = 0; }
         if (key === 'signature') sigPlacement(it, l, b);
@@ -466,12 +476,18 @@ async function processPdf(bytes, env, meta = {}) {
   pages.forEach((P, pi) => {
     for (const r of P.rules) {
       if (r.x1 - r.x0 > (P.view[2] - P.view[0]) * 0.8) continue; // page-wide rules are decoration
+      // exact box positions from the picture beat the ones guessed from recognised "| | |" text
+      if (r.cells) {
+        const same = blanks.find((b) => b.page === pi && b.boxes && Math.abs(b.y - r.y) < 14 && b.x < r.x1 && b.x + 20 > r.x0 - 30);
+        if (same) { same.boxes = r.cells.map(([a, z]) => ({ x0: a, x1: z })); same.x = r.x0; same.y = r.y + 2; continue; }
+      }
       const taken = blanks.some((b) => b.page === pi && b.kind !== 'field' && Math.abs(b.y - r.y) < 14 && b.x >= r.x0 - 40 && b.x <= r.x1);
       if (taken || inWidget(pi, r.x0, r.y, r.x1, r.y + 10)) continue;
-      const filled = P.items.some((it) => { const cx = it.x + it.w / 2; return cx > r.x0 + 3 && cx < r.x1 - 3 && it.y >= r.y - 2 && it.y - r.y < 12 && it.str.trim(); });
+      // already written on? (scans read box bars as "I", "l", "|": not writing)
+      const filled = P.items.some((it) => { const cx = it.x + it.w / 2; return cx > r.x0 + 3 && cx < r.x1 - 3 && it.y >= r.y - 2 && it.y - r.y < 12 && /[\p{L}\p{N}]/u.test(it.str) && !/^[|Il1L_\[\]()!:;.,\s]+$/.test(it.str); });
       if (filled) continue;
       let key = null, label = '', size = 10, place = 'on';
-      const l = P.lines.find((l) => l.y >= r.y - 1 && l.y - r.y < 14 && l.x0 < r.x0);
+      const l = P.lines.find((l) => { const y = lineYAt(l, r.x0); return y >= r.y - 1 && y - r.y < 14 && l.x0 < r.x0; });
       if (l) {
         let k = 0;
         while (k < l.chars.length && l.chars[k].x1 <= r.x0 + 2) k++;
@@ -481,13 +497,14 @@ async function processPdf(bytes, env, meta = {}) {
         if (gap < 150 && tail.trim()) { key = classify(tail, env.compiled, { ...opts, window: label }); size = l.size; }
       }
       if (!key) {
-        const below = P.lines.find((l) => r.y - l.y > 0 && r.y - l.y < 16 && l.x0 >= r.x0 - 10 && l.x0 < r.x1);
+        const below = P.lines.find((l) => { const y = lineYAt(l, (r.x0 + r.x1) / 2); return r.y - y > 0 && r.y - y < 16 && l.x0 >= r.x0 - 10 && l.x0 < r.x1; });
         const m = below && /^\s*\(([^)]{2,50})\)/.exec(below.str);
         if (m) { key = classify(m[1], env.compiled, { ...opts, maxTail: 30 }); label = '(' + m[1] + ')'; size = below.size; place = 'over'; }
       }
       if (!key) continue;
       size = clamp(size, 7, 12);
-      const it = { kind: 'text', page: pi, key, x: r.x0 + 2, y: r.y + 2, size, maxW: r.x1 - r.x0 - 4, cover: null,
+      const it = { kind: 'text', page: pi, key, x: r.x0 + 2, y: r.y + 2, size, maxW: r.cells ? 0 : r.x1 - r.x0 - 4, cover: null,
+        boxes: r.cells ? r.cells.map(([a, z]) => ({ x0: a, x1: z })) : undefined,
         before: label.replace(/\s+/g, ' ').trim().slice(-48), after: place === 'over' ? '(line)' : '', where: 'page ' + (pi + 1), canImage: true };
       if (key === 'signature') { it.kind = 'image'; it.h = clamp(size * 2.8, 22, 44); it.w = Math.min(it.h * sig.w / sig.h, r.x1 - r.x0); it.h = it.w * sig.h / sig.w; it.y = r.y - 2; }
       blanks.push(it);
@@ -514,6 +531,9 @@ async function processPdf(bytes, env, meta = {}) {
         const ys = hAt((left + right) / 2);
         const top = ys.find((y) => y > l.y + l.size * 0.5), bottom = [...ys].reverse().find((y) => y < l.y + 1);
         if (top == null || bottom == null) continue;
+        // a label cell holds one short line, not a paragraph
+        const linesInCell = P.lines.filter((q) => q.y > bottom && q.y < top && q.chars.some((ch, i) => /\S/.test(q.str[i]) && ch.x0 > left && ch.x1 < right)).length;
+        if (linesInCell > 2) continue;
         let cell = null;
         const right2 = vAt((top + bottom) / 2).find((x) => x > right + 8);
         if (right2 != null && emptyRect(right + 1, bottom + 1, right2 - 1, top - 1)) cell = { x0: right, x1: right2, y0: bottom, y1: top };
@@ -545,6 +565,10 @@ async function processPdf(bytes, env, meta = {}) {
     if (b.kind === 'insert' && it.maxW < it.w * 0.6) { it.x = l.x0; it.y = l.y - it.h - 3; }
   }
 
+  // reading order (top to bottom, left to right), so neighbouring blanks can inform each other
+  const rowOf = (b) => -Math.round((b.kind === 'field' ? b.rect.y + b.rect.h / 2 : b.y) / 6);
+  const xOf = (b) => (b.kind === 'field' ? b.rect.x : b.x);
+  blanks.sort((a, b) => a.page - b.page || rowOf(a) - rowOf(b) || xOf(a) - xOf(b));
   const scanned = pages.every((p) => p.items.length === 0);
   const ocrUsed = pages.some((p) => p.ocr);
   let xfa = false;

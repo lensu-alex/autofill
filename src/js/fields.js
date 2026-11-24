@@ -132,7 +132,7 @@ function classify(label, compiled, opts = {}) {
       if (tail > maxTail) continue;
       // "Label:" lines: the field word must open the label ("Data:", not "poate fi dată:")
       if (opts.maxLead != null && L.slice(0, idx).trim().split(' ').filter(Boolean).length > opts.maxLead) continue;
-      const score = s.length * 2 - tail * 3;
+      const score = s.length * 2 - tail * 6; // the word closest to the blank matters most
       if (!best || score > best.score) best = { key: f.key, syn: s, score, tail };
     }
   }
