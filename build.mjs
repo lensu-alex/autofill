@@ -15,6 +15,7 @@ const vendor = [
   nm('tesseract.js/dist/tesseract.min.js'),
   nm('pako/dist/pako.min.js'),
   nm('utif/UTIF.js'),
+  nm('libheif-js/libheif-wasm/libheif-bundle.js'),
 ];
 // OCR engine + language data: stored as base64, decoded only when a scan is opened
 const bin = (p) => readFileSync(new URL('./node_modules/' + p, import.meta.url)).toString('base64');

@@ -117,7 +117,19 @@ const App = {
   markDirty() { this.dirty = true; $('#dirty').hidden = false; this.refreshValues(); },
   refreshValues() { this.compiled = compileFields(this.vault); this.values = computeValues(this.vault); },
 
+  buildLearned() {
+    const box = $('#learned-list');
+    box.textContent = '';
+    const L = this.vault.learned || [];
+    if (!L.length) { box.append(h('span', { class: 'muted', text: 'Nothing yet.' })); return; }
+    L.slice().reverse().forEach((l) => {
+      box.append(h('div', { class: 'learned' }, h('span', { text: `"${l.phrase}" → ${fieldLabel(l.key, this.vault)}` }),
+        h('button', { class: 'mini danger', onclick: () => { this.vault.learned = L.filter((x) => x !== l); this.refreshValues(); this.markDirty(); this.saveVault(); this.buildLearned(); } }, 'Forget')));
+    });
+  },
+
   showTab(t) {
+    if (t === 'settings') this.buildLearned();
     $$('.tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
     for (const id of ['fill', 'info', 'settings']) $('#tab-' + id).hidden = id !== t;
     if (t === 'fill' && this.sess && this.editor) this.editor.drawAll();

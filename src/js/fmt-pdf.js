@@ -26,10 +26,25 @@ async function imageCanvases(bytes, type) {
     ctx.drawImage(bmp, 0, 0);
     return [c];
   } catch (e) {
-    if (!/tiff/.test(type) || typeof UTIF === 'undefined') {
-      if (/hei[cf]/.test(type)) throw new Error('This browser can\'t open HEIC photos. Open it in Preview → File → Export → JPEG, or use Safari.');
-      throw new Error('Could not read this picture');
+    if (/hei[cf]/.test(type) && typeof libheif !== 'undefined') {
+      // iPhone photos: Chrome can't decode HEIC itself (libheif, WebAssembly)
+      const lib = typeof libheif === 'function' ? libheif() : libheif;
+      const imgs = new lib.HeifDecoder().decode(bytes);
+      if (!imgs || !imgs.length) throw new Error('Could not read this HEIC photo');
+      const out = [];
+      for (const im of imgs.slice(0, 1)) {
+        const w = im.get_width(), hh = im.get_height();
+        const c = document.createElement('canvas');
+        c.width = w; c.height = hh;
+        const ctx = c.getContext('2d');
+        const data = ctx.createImageData(w, hh);
+        await new Promise((res, rej) => im.display(data, (d) => (d ? res() : rej(new Error('Could not read this HEIC photo')))));
+        ctx.putImageData(data, 0, 0);
+        out.push(c);
+      }
+      return out;
     }
+    if (!/tiff/.test(type) || typeof UTIF === 'undefined') throw new Error('Could not read this picture');
     const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     const ifds = UTIF.decode(buf);
     const out = [];

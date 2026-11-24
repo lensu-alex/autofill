@@ -106,3 +106,5 @@ button.danger { color: var(--bad); }
   #work.visual .side { position: static; max-height: none; }
   .customrow { grid-template-columns: 1fr 1fr; }
 }
+
+.learned { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); }

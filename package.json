@@ -18,6 +18,7 @@
     "@tesseract.js-data/ron": "^1.0.0",
     "dejavu-fonts-ttf": "^2.37.3",
     "jszip": "^3.10.1",
+    "libheif-js": "^1.19.8",
     "pako": "^2.2.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
