@@ -63,9 +63,11 @@ for (const f of files) {
   console.log(`\n### ${f}  (${summary})`);
   rows.forEach((r) => console.log('  ' + r));
   if (await page.locator('#editor .pg').count()) await page.locator('#editor').screenshot({ path: OUT + f + '.png' });
-  const [dl] = await Promise.all([page.waitForEvent('download'), click('#save-doc')]);
-  await dl.saveAs(OUT + dl.suggestedFilename());
-  console.log('  saved', dl.suggestedFilename());
+  try {
+    const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), click('#save-doc')]);
+    await dl.saveAs(OUT + dl.suggestedFilename());
+    console.log('  saved', dl.suggestedFilename());
+  } catch { console.log('  SAVE FAILED:', await page.locator('.toast.bad').last().innerText().catch(() => '(no message)'), errors.slice(-2)); }
   await click('#close-doc');
 }
 

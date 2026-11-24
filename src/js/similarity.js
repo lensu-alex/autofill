@@ -85,7 +85,7 @@ function fuzzyTop(query, fz, k = 6) {
   return out.sort((a, b) => b.score - a.score).slice(0, k);
 }
 
-const FZ_STOP = new Set(['si', 'de', 'la', 'in', 'al', 'a', 'ale', 'the', 'of', 'and', 'du', 'des', 'et', 'di', 'del', 'y', 'e', 'cu', 'pe', 'din', 'le', 'your', 'my', 'nr', 'no']);
+const FZ_STOP = new Set(['si', 'de', 'la', 'in', 'al', 'a', 'ale', 'the', 'of', 'and', 'du', 'des', 'et', 'di', 'del', 'y', 'e', 'cu', 'pe', 'din', 'le', 'your', 'my']); // 'nr'/'no' carry meaning ("passport no" is not "passport")
 function wordSim(a, b) {
   if (a === b) return 1;
   if (a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))) return 0.9;

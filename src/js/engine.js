@@ -233,7 +233,7 @@ function sectionsOf(texts) {
     return cur;
   });
 }
-const OTHER_SECTION = /\b(copil|copii|copiii|copiilor|copilului|minor|minori|minorului|parinti|parintilor|sot|sotie|sotului|sotiei|reprezentant|reprezentantului|imputernicit|imputernicitului|tutore|garant|codebitor|mostenitor|decedat|defunct|child|children|spouse|parent|parents|guardian|representative|requester)\b/;
+const OTHER_SECTION = /\b(copil|copii|copiii|copiilor|copilului|minor|minori|minorului|parinti|parintilor|sot|sotie|sotului|sotiei|reprezentant|reprezentantului|imputernicit|imputernicitului|tutore|garant|codebitor|mostenitor|decedat|defunct|child|children|spouse|parent|parents|guardian|representative|requester|father|mother|tatal|tatalui|mama|mamei)\b/;
 const OFFICE_SECTION = /\b(comisia|rezervat|uz intern|uz oficial|for office use|official use|se completeaza de|completat de|aviz|avizat|aprobat|viza|presedintele|secretar|inspector|registratura)\b/;
 const SELF_SECTION = /\b(solicitant|solicitantului|subsemnat|titular|titularului|date personale|applicant|your details|personal details|despre dumneavoastra)\b/;
 function applySections(blanks) {
@@ -245,7 +245,7 @@ function applySections(blanks) {
     }
     // a bare line of underscores continuing a list ("anexez următoarele acte: ____ / ____ / ____")
     if (!b.key && !lab.replace(/[\s_.…]/g, '') && b.kind !== 'field' && b.kind !== 'cell') { b.optional = true; continue; }
-    if (!b.section || !b.key || b.key === 'today' || b.key === 'signature') continue;
+    if (!b.section || !b.key || b.key === 'today' || b.key === 'signature' || /^(mother|father|parent)/.test(b.key)) continue; // "prenumele părinților: mama ___" is your own info
     const n = norm(b.section);
     if (OTHER_SECTION.test(n) && !SELF_SECTION.test(n)) {
       b.otherKey = b.key; b.key = null; b.guess = false; b.otherPerson = true;

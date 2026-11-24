@@ -14,11 +14,11 @@ const FIELD_GROUPS = [
 
 const FIELD_DEFS = [
   { key: 'last_name', group: 'identity', label: 'Last name · Nume', syn: ['nume de familie', 'numele de familie', 'last name', 'surname', 'family name', 'lastname', 'nom'] },
-  { key: 'first_name', group: 'identity', label: 'First name · Prenume', syn: ['prenume', 'prenumele', 'first name', 'given name', 'given names', 'firstname', 'forename', 'prenom'] },
+  { key: 'first_name', group: 'identity', label: 'First name · Prenume', syn: ['prenume', 'prenumele', 'first name', 'given name', 'given names', 'firstname', 'forename', 'forenames', 'first and middle names', 'first and middle name', 'first names', 'prenom'] },
   { key: 'full_name', group: 'identity', label: 'Full name · Nume și prenume', hint: 'empty = first + last name', syn: ['nume si prenume', 'numele si prenumele', 'nume de familie si prenume', 'numele de familie si prenumele', 'numele si prenumele complet', 'nume prenume', 'numele complet', 'nume complet', 'full name', 'name', 'name and surname', 'your name', 'applicant name', 'subsemnatul', 'subsemnata', 'subsemnatii', 'undersigned', 'titular', 'titularul', 'solicitant', 'solicitantul', 'eu', 'i the undersigned', 'elevul', 'eleva', 'studentul', 'studenta', 'candidatul', 'candidata'] },
   { key: 'cnp', group: 'identity', label: 'CNP / personal number', syn: ['cnp', 'c n p', 'cod numeric personal', 'codul numeric personal', 'personal numeric code', 'personal identification number', 'national id number', 'pin'] },
   { key: 'birth_date', group: 'identity', label: 'Date of birth · Data nașterii', syn: ['data nasterii', 'data de nastere', 'nascut la data de', 'nascuta la data de', 'nascut la', 'nascuta la', 'date of birth', 'birth date', 'birthdate', 'dob', 'born on'] },
-  { key: 'birth_place', group: 'identity', label: 'Place of birth · Locul nașterii', syn: ['locul nasterii', 'loc nastere', 'locul de nastere', 'nascut in', 'nascuta in', 'place of birth', 'birthplace', 'born in'] },
+  { key: 'birth_place', group: 'identity', label: 'Place of birth · Locul nașterii', syn: ['locul nasterii', 'loc nastere', 'locul de nastere', 'nascut in', 'nascuta in', 'place of birth', 'birthplace', 'born in', 'town of birth', 'city of birth', 'localitatea nasterii', 'localitatea de nastere'] },
   { key: 'gender', group: 'identity', label: 'Sex / gender', syn: ['sex', 'sexul', 'gender'] },
   { key: 'citizenship', group: 'identity', label: 'Citizenship · Cetățenie', syn: ['cetatenie', 'cetatenia', 'cetatean', 'nationalitate', 'nationalitatea', 'citizenship', 'nationality'] },
   { key: 'father_name', group: 'identity', label: "Father's first name · Tatăl", syn: ['fiul lui', 'fiica lui', 'numele tatalui', 'prenumele tatalui', 'tatal', 'father s name', 'fathers name', 'father name', 'father'] },
@@ -113,7 +113,7 @@ const AMBIG_CONTEXT = {
   ],
 };
 
-const OTHER_PERSON = / (parintilor|parintelui|tatalui|mamei|copilului|copiilor|copil|minorului|minorilor|sotului|sotiei|sotul|sotia|reprezentantului|reprezentant|reprezentata prin|reprezentat prin|imputernicitului|imputernicit|mandatarului|tutorelui|decedatului|defunctului|requester s|requester|spouse s|spouse|child s|children|parent s|parents|guardian s|guardian|agent s|employer s|beneficiarului) /;
+const OTHER_PERSON = / (parintilor|parintelui|tatalui|mamei|copilului|copiilor|copil|minorului|minorilor|sotului|sotiei|sotul|sotia|reprezentantului|reprezentant|reprezentata prin|reprezentat prin|imputernicitului|imputernicit|mandatarului|tutorelui|decedatului|defunctului|requester s|requester|spouse s|spouse|child s|children|parent s|parents|guardian s|guardian|agent s|employer s|beneficiarului|father s|mother s|father|mother|parent 1|parent 2|partner s|tatalui|mamei) /;
 
 // Build the matcher list for a vault (defaults + your custom fields)
 function compileFields(vault) {
@@ -177,7 +177,18 @@ function lastWordIndex(hay, word) { return hay.lastIndexOf(' ' + word + ' '); }
 
 // Which field does this label ask for? Returns a key or null.
 // opts.window: text before the blank (gives context for "nr", "data")
+// "previous names", "maiden name", "former address": not your current details
+const NOT_CURRENT = / (previous|former|maiden|other names|alias|fost|anterior|anterioara|vechi|vechiul|vechea) /;
 function classify(label, compiled, opts = {}) {
+  // explanations in brackets must not outvote the label: "Current address (house number, street, town/city)"
+  if (!opts._inner && /\([^)]{3,}\)/.test(label)) {
+    const outside = String(label).replace(/\([^)]*\)/g, ' ');
+    if (outside.replace(/[\s:.,;-]/g, '').length >= 3) {
+      const k = classify(outside, compiled, { ...opts, _inner: true });
+      if (k) return k;
+    }
+  }
+  if (NOT_CURRENT.test(' ' + norm(label) + ' ')) { classify.lastGuess = false; return null; }
   const L = ' ' + norm(cleanLabel(label)) + ' ';
   if (!L.trim()) return null;
   const maxTail = opts.maxTail ?? 24;
@@ -241,6 +252,8 @@ function classify(label, compiled, opts = {}) {
     }
   }
   if (pick) return pick;
+  // "Date of loss", "Date of marriage": some other date, not today
+  if (best.key === '@date' && / date of (?!(application|signing|signature|completion|submission|request|declaration|filling)\b)\w+/.test(' ' + norm(label) + ' ')) return null;
   if (best.key === '@date') return 'today';
   if (best.key === '@seria') return 'id_series';
   // "Telephone Number": the vague word lost its meaning, so the next best word decides

@@ -301,10 +301,10 @@ async function processPdf(bytes, env, meta = {}) {
         env.progress && env.progress(`Reading page ${i + 1} of ${js.numPages}…`);
         const r = await ocrPage(pg, (st, p) => env.progress && env.progress(`Reading page ${i + 1} of ${js.numPages}: ${st}${p ? ' ' + Math.round(p * 100) + '%' : ''}`));
         const vert = (rules.vertical || []).concat(r.vrules || []);
-        items = r.items; rules = rules.concat(r.rules); rules.vertical = vert; ocr = true;
+        items = r.items; rules = rules.concat(r.rules); rules.vertical = vert; rules.gridV = r.gridV || []; ocr = true;
       } catch (e) { console.warn('OCR failed', e); }
     }
-    pages.push({ pg, view: pg.view, items, lines: buildLines(items), rules, vrules: rules.vertical || [], ocr });
+    pages.push({ pg, view: pg.view, items, lines: buildLines(items), rules, vrules: rules.vertical || [], gridV: (rules.vertical || []).concat(rules.gridV || []), ocr });
   }
   const allText = pages.map((p) => p.items.map((i) => i.str).join(' ')).join(' ');
   const opts = { docHasPrenume: /prenume/.test(norm(allText)) };
@@ -489,6 +489,10 @@ async function processPdf(bytes, env, meta = {}) {
       // already found as a printed blank on this same line (lines can be only ~14pt apart)
       const taken = blanks.some((b) => b.page === pi && b.kind !== 'field' && Math.abs(b.y - r.y) < Math.min(8, (b.size || 10) * 0.7) && b.x >= r.x0 - 25 && b.x <= r.x1);
       if (taken || inWidget(pi, r.x0, r.y, r.x1, r.y + 10)) continue;
+      // the bottom of a tick box (sides going up from both ends) is not a line to write on
+      const side = (x) => P.gridV.some((v) => Math.abs(v.x - x) < 2.5 && Math.abs(v.y0 - r.y) < 3 && v.y1 - r.y > 5);
+      const lid = P.rules.some((q) => q !== r && Math.abs(q.x0 - r.x0) < 1.5 && Math.abs(q.x1 - r.x1) < 1.5 && q.y - r.y > (r.x1 - r.x0) * 0.6 && q.y - r.y < (r.x1 - r.x0) * 1.5);
+      if (r.x1 - r.x0 < 30 && side(r.x0) && side(r.x1) && lid) continue;
       // already written on? (scans read box bars as "I", "l", "|": not writing)
       const filled = P.items.some((it) => { const cx = it.x + it.w / 2; return cx > r.x0 + 3 && cx < r.x1 - 3 && it.y >= r.y - 2 && it.y - r.y < 12 && /[\p{L}\p{N}]/u.test(it.str) && !/^[|Il1L_\[\]()!:;.,\s]+$/.test(it.str); });
       if (filled) continue;
@@ -568,11 +572,14 @@ async function processPdf(bytes, env, meta = {}) {
           if (bottom2 != null && emptyRect(left + 1, bottom2 + 1, right - 1, bottom - 1)) cell = { x0: left, x1: right, y0: bottom2, y1: bottom };
         }
         if (!cell) continue;
+        if (cell.x1 - cell.x0 < 18 && cell.x1 > P.view[2] - 25) continue; // a thin strip at the page edge is a margin, not somewhere to write
         if (blanks.some((b) => b.page === pi && b.x >= cell.x0 - 2 && b.x <= cell.x1 && b.y >= cell.y0 - 2 && b.y <= cell.y1)) continue;
         if (inWidget(pi, cell.x0 + 2, cell.y0 + 2, cell.x1 - 2, cell.y1 - 2)) continue;
+        // the form already has a fillable box for this label
+        if (blanks.some((b) => b.kind === 'field' && b.page === pi && b.key === key && Math.abs(b.rect.y + b.rect.h / 2 - (cell.y0 + cell.y1) / 2) < 30)) continue;
         const size = clamp(Math.max(l.size, 10), 7, Math.max(7, Math.min(12, (cell.y1 - cell.y0) * 0.6)));
         const it = { kind: 'text', page: pi, key, x: cell.x0 + 3, y: cell.y0 + (cell.y1 - cell.y0) / 2 - size * 0.35, size, maxW: cell.x1 - cell.x0 - 6,
-          cover: null, before: text, labelText: text, after: '', where: 'page ' + (pi + 1) + ' · table', canImage: true };
+          cover: null, before: text, labelText: text, after: '', where: 'page ' + (pi + 1) + ' · table', canImage: true, cell };
         if (key === 'signature') {
           it.kind = 'image';
           it.h = clamp((cell.y1 - cell.y0) - 4, 14, 44); it.w = Math.min(it.h * sig.w / sig.h, cell.x1 - cell.x0 - 6); it.h = it.w * sig.h / sig.w;
@@ -580,6 +587,156 @@ async function processPdf(bytes, env, meta = {}) {
         }
         blanks.push(it);
       }
+    }
+  });
+
+  // 5) Character grids: rows of boxes, one letter per box, label above the row (UK/EU and ANAF forms)
+  // capitals only if the form asks for them (not "you do not have to … in capital letters")
+  const capsMatch = /(.{0,40})(block capitals|block letters|in capital letters|cu majuscule|cu litere mari|litere de tipar)/i.exec(allText);
+  const wantsCaps = !!capsMatch && !/\b(not|don.t|nu|fără)\b/i.test(capsMatch[1]);
+  pages.forEach((P, pi) => {
+    const V = P.gridV || P.vrules, H = [...P.rules].sort((a, b) => b.y - a.y);
+    if (V.length < 5 || H.length < 2) return;
+    const rows = [];
+    // rules at the same height form one band (a row of boxes can be drawn as separate pieces)
+    const bands = [];
+    for (const h of H) {
+      const b = bands.find((q) => Math.abs(q.y - h.y) <= 1.5);
+      if (b) b.segs.push(h); else bands.push({ y: h.y, segs: [h] });
+    }
+    for (let i = 0; i < bands.length; i++) {
+      for (let j = i + 1; j < bands.length; j++) {
+        const top = bands[i], bot = bands[j];
+        const hgt = top.y - bot.y;
+        if (hgt < 9) continue;
+        if (hgt > 30) break;
+        // stretches where both the top and the bottom rule are drawn
+        const spans = [];
+        for (const a of top.segs) for (const c of bot.segs) {
+          const s0 = Math.max(a.x0, c.x0), s1 = Math.min(a.x1, c.x1);
+          if (s1 - s0 >= 12) spans.push([s0, s1]);
+        }
+        if (spans.reduce((t, [a, c]) => t + c - a, 0) < 24) continue;
+        const covered = (x) => spans.some(([a, c]) => x >= a - 1 && x <= c + 1);
+        // dividers spanning the row, plus the ends of each stretch
+        const xs = V.filter((v) => v.y0 <= bot.y + 2 && v.y1 >= top.y - 2 && covered(v.x)).map((v) => v.x).concat(spans.flat()).sort((a, b) => a - b)
+          .filter((x, k, arr) => k === 0 || x - arr[k - 1] > 3);
+        // split into runs of evenly spaced boxes
+        let run = [xs[0]];
+        const groups = [];
+        const flushRun = () => {
+          const steps = run.slice(1).map((x, k) => x - run[k]);
+          const pitch = steps.slice().sort((a, b) => a - b)[steps.length >> 1];
+          if (run.length >= 2 && pitch >= 7 && pitch <= 28) groups.push({ cells: run.slice(1).map((x, k) => ({ x0: run[k], x1: x })), pitch });
+        };
+        for (let k = 1; k < xs.length; k++) {
+          const step = xs[k] - xs[k - 1];
+          const prev = run.length > 1 ? run[run.length - 1] - run[run.length - 2] : step;
+          if (step >= 7 && step <= 28 && Math.abs(step - prev) <= Math.max(2, prev * 0.25) && covered((xs[k] + xs[k - 1]) / 2)) run.push(xs[k]);
+          else { flushRun(); run = [xs[k]]; }
+        }
+        flushRun();
+        // dates as separate groups of boxes: 2-2-4 (dd mm yyyy) or 2-2-2
+        for (let g = 0; g < groups.length; g++) {
+          const trio = groups.slice(g, g + 3);
+          const sizes = trio.map((q) => q.cells.length).join('-');
+          if (trio.length === 3 && (sizes === '2-2-4' || sizes === '2-2-2') && trio[2].cells[0].x0 - trio[0].cells[0].x0 < trio[0].pitch * 14) {
+            rows.push({ page: pi, top: top.y, bottom: bot.y, cells: trio.flatMap((q) => q.cells), pitch: trio[0].pitch, date: true });
+            g += 2;
+          } else if (groups[g].cells.length >= 5) rows.push({ page: pi, top: top.y, bottom: bot.y, cells: groups[g].cells, pitch: groups[g].pitch });
+        }
+        break; // the nearest line below is this row's bottom
+      }
+    }
+    if (!rows.length) return;
+    rows.sort((a, b) => b.top - a.top || a.cells[0].x0 - b.cells[0].x0);
+    const textAbove = (r) => {
+      const x0 = r.cells[0].x0 - 4, x1 = r.cells[r.cells.length - 1].x1;
+      // the nearest line above with words over the boxes (a sidebar at the same height doesn't count)
+      const inRange = (l) => l.str.split('').filter((_, i) => l.chars[i] && l.chars[i].x0 >= x0 - 2 && l.chars[i].x1 <= x1 + 2).join('').trim();
+      const l = P.lines.filter((q) => { const y = lineYAt(q, x0 + 10); return y > r.top - 2 && y - r.top < 16 && inRange(q); }).sort((a, b) => lineYAt(a, x0) - lineYAt(b, x0))[0];
+      return l ? inRange(l) : '';
+    };
+    const textLeft = (r) => {
+      const mid = (r.top + r.bottom) / 2, x0 = r.cells[0].x0;
+      const l = P.lines.find((q) => { const y = lineYAt(q, x0 - 20); return y > r.bottom - 2 && y < r.top; });
+      if (!l) return '';
+      const idx = l.str.split('').map((_, i) => i).filter((i) => l.chars[i] && l.chars[i].x1 <= x0 + 1 && l.chars[i].x0 >= x0 - 120);
+      const lastInk = idx.filter((i) => /\S/.test(l.str[i])).pop();
+      if (lastInk == null || x0 - l.chars[lastInk].x1 > 12) return ''; // words far to the left belong to something else
+      return idx.map((i) => l.str[i]).join('').split(/\t/).pop().trim();
+    };
+    let prevRow = null, about = null;
+    for (const r of rows) {
+      const x0 = r.cells[0].x0, x1 = r.cells[r.cells.length - 1].x1;
+      let frameLabel = '';
+      // anything found earlier inside this row of boxes was a misreading: the grid wins
+      for (let k = blanks.length - 1; k >= 0; k--) {
+        const b = blanks[k];
+        if (b.page !== pi || b.kind === 'field') continue;
+        const inside = b.y >= r.bottom - 3 && b.y <= r.top + 3 && b.x >= x0 - 8 && b.x <= x1;
+        // a table cell that holds this row of boxes was only the frame around it
+        const frame = b.cell && b.cell.y0 <= r.bottom + 3 && b.cell.y1 >= r.top - 3 && b.cell.x0 < x1 && b.cell.x1 > x0;
+        if (frame && !frameLabel && b.key) frameLabel = b.labelText || '';
+        if (inside || frame) blanks.splice(k, 1);
+      }
+      // a label just left of the boxes ("CNP |_|_|…") beats the line above; a table cell holding the boxes gives its label too
+      const above = textAbove(r), left = textLeft(r);
+      const label = left || above || frameLabel;
+      // rows under "Father's or Parent 1's full name" are about that parent, until the next block of the form
+      if (prevRow && prevRow.bottom - r.top > 40) about = null;
+      if (/\b(father|mother|parent [12]|tat[aă]l|mama)/i.test(label)) about = label;
+      let key = label ? classify(label, env.compiled, { ...opts, maxTail: 30, window: label }) : null;
+      const size = clamp(Math.min((r.top - r.bottom) * 0.62, r.pitch * 0.95), 6, 12);
+      const it = { kind: 'text', page: pi, key, x: x0 + 1, y: r.bottom + (r.top - r.bottom - size * 0.72) / 2, size, maxW: 0, cover: null,
+        boxes: r.cells, grid: true, caps: wantsCaps && !/mail/i.test(label), dateBoxes: !!r.date, before: label.slice(-48), labelText: label, after: '', where: 'page ' + (pi + 1) + ' · boxes', canImage: false, section: about || undefined };
+      // a row right under another, with no label of its own, carries on the same answer (address line 2, 3…)
+      if (!label && prevRow && prevRow.item.page === pi && prevRow.bottom - r.top < 14 && Math.abs(prevRow.cells[0].x0 - x0) < 4) {
+        it.continues = prevRow.item;
+        it.key = prevRow.item.key; it.optional = true;
+        prevRow.item.next = it;
+      } else if (!label) it.optional = true;
+      blanks.push(it);
+      prevRow = { ...r, item: it };
+    }
+  });
+
+  // 6) Drawn tick boxes next to a choice word ("Male ▢  Female ▢"): an X goes in the one that matches
+  pages.forEach((P, pi) => {
+    const V = P.gridV || P.vrules;
+    const H = P.rules.filter((r) => r.x1 - r.x0 >= 6 && r.x1 - r.x0 <= 16);
+    for (const top of H) {
+      const w = top.x1 - top.x0;
+      const bot = H.find((r) => r !== top && top.y - r.y > w * 0.6 && top.y - r.y < w * 1.5 && Math.abs(r.x0 - top.x0) < 1.5 && Math.abs(r.x1 - top.x1) < 1.5);
+      if (!bot) continue;
+      const side = (x) => V.some((v) => Math.abs(v.x - x) < 2 && v.y0 <= bot.y + 2 && v.y1 >= top.y - 2 && v.y1 - v.y0 < (top.y - bot.y) * 1.6);
+      if (!side(top.x0) || !side(top.x1)) continue;
+      const box = { x0: top.x0, x1: top.x1, y0: bot.y, y1: top.y };
+      // part of a row of letter boxes, not a lone tick box
+      if (blanks.some((b) => b.page === pi && b.grid && b.boxes.some((c) => Math.abs(c.x0 - box.x0) < 2) && Math.abs(b.y - box.y0) < 6)) continue;
+      // the word right after the box, or right before it
+      const mid = (box.y0 + box.y1) / 2;
+      let word = '';
+      for (const l of P.lines) {
+        if (Math.abs(lineYAt(l, box.x1) + l.size * 0.3 - mid) > Math.max(4, (box.y1 - box.y0) * 0.6)) continue;
+        // whichever word is closer: "Male ▢ Female ▢" has the words before, "▢ Da ▢ Nu" after
+        const after = l.chars.findIndex((c, i) => /\S/.test(l.str[i]) && c.x0 > box.x1 - 1 && c.x0 < box.x1 + 12);
+        let before = -1;
+        l.chars.forEach((c, i) => { if (/\S/.test(l.str[i]) && c.x1 < box.x0 + 1 && c.x1 > box.x0 - 12) before = i; });
+        if (after < 0 && before < 0) continue;
+        const dA = after >= 0 ? l.chars[after].x0 - box.x1 : 1e9, dB = before >= 0 ? box.x0 - l.chars[before].x1 : 1e9;
+        word = dA < dB ? /^\S+/.exec(l.str.slice(after))[0] : /\S+$/.exec(l.str.slice(0, before + 1))[0];
+        break;
+      }
+      word = word.replace(/[^\p{L}\p{N}]+$/u, '').replace(/^[^\p{L}\p{N}]+/u, '');
+      if (!canonGender(norm(word))) continue;
+      for (let k = blanks.length - 1; k >= 0; k--) {
+        const b = blanks[k];
+        if (b.page === pi && b.kind !== 'field' && !b.grid && b.x >= box.x0 - 3 && b.x <= box.x1 + 3 && b.y >= box.y0 - 3 && b.y <= box.y1 + 3) blanks.splice(k, 1);
+      }
+      const size = clamp((box.y1 - box.y0) * 0.8, 6, 12);
+      blanks.push({ kind: 'text', page: pi, key: 'gender', option: word, mark: true, x: box.x0 + (box.x1 - box.x0 - size * 0.62) / 2, y: box.y0 + (box.y1 - box.y0 - size * 0.72) / 2,
+        size, maxW: 0, cover: null, before: '☐ ' + word, labelText: word, after: '', where: 'page ' + (pi + 1) + ' · tick box', canImage: false });
     }
   });
 
@@ -614,6 +771,16 @@ function setBlankKind(b, key, vault) {
 }
 
 function boxChars(t) { return String(t).replace(/[\s.\-/]/g, ''); }
+// what goes in each box of a row; long answers carry on into the rows below (it.next)
+function cellChars(b, text) {
+  if (!b.grid) return boxChars(text);
+  let t = String(text);
+  if (/^(birth_date|today|id_issue_date|id_expiry_date|cnp|phone|postal_code|iban|id_number)$/.test(b.key || '')) t = t.replace(/[\s.\-/]/g, '');
+  if (b.caps) t = t.toLocaleUpperCase('ro');
+  let skip = 0;
+  for (let p = b.continues; p; p = p.continues) skip += p.boxes.length;
+  return Array.from(t).slice(skip, skip + b.boxes.length).join('');
+}
 
 function fitSize(b, text) {
   let size = b.size;
@@ -633,6 +800,7 @@ async function buildPdf(sess, valueOf, opts) {
   let sigImg = null;
   const sigImage = async (img) => sigImg || (sigImg = await doc.embedPng(img.bytes));
   let formTouched = false;
+  const touched = [];
   const form = sess.blanks.some((b) => b.kind === 'field') ? doc.getForm() : null;
 
   for (const b of sess.blanks) {
@@ -654,11 +822,11 @@ async function buildPdf(sess, valueOf, opts) {
         continue;
       }
       try {
-        if (val.check) { form.getCheckBox(b.fieldName).check(); continue; }
+        if (val.check) { const cb = form.getCheckBox(b.fieldName); cb.check(); touched.push(cb); continue; }
         if (val.choice != null) {
           const f = form.getField(b.fieldName);
           f.select(val.choice);
-          formTouched = true;
+          formTouched = true; touched.push(f);
           continue;
         }
       } catch (e) { console.warn('could not set', b.fieldName, e); continue; }
@@ -666,8 +834,8 @@ async function buildPdf(sess, valueOf, opts) {
       const f = form.getTextField(b.fieldName);
       let t = val.text;
       if (b.maxLen && t.length > b.maxLen) t = t.slice(0, b.maxLen);
-      f.setText(t);
-      formTouched = true;
+      try { f.setText(t); } catch (e) { console.warn('could not set', b.fieldName, e); continue; }
+      formTouched = true; touched.push(f);
       continue;
     }
     if (val.image) {
@@ -676,7 +844,7 @@ async function buildPdf(sess, valueOf, opts) {
       continue;
     }
     if (b.boxes) {
-      const chars = boxChars(val.text);
+      const chars = Array.from(cellChars(b, val.text));
       b.boxes.forEach((bx, i) => {
         if (!chars[i]) return;
         const w = font.widthOfTextAtSize(chars[i], b.size);
@@ -688,7 +856,18 @@ async function buildPdf(sess, valueOf, opts) {
     page.drawText(val.text, { x: b.x, y: b.y, size: fitSize(b, val.text), font, color: ink });
   }
   if (form) { try { form.deleteXFA(); } catch { /* not an XFA form */ } } // so every viewer shows the normal fields
-  if (formTouched) form.updateFieldAppearances(font);
+  if (formTouched || touched.length) {
+    // redraw only the fields we changed; a broken field elsewhere must not stop the save
+    let failed = false;
+    for (const f of touched) {
+      try {
+        if (f instanceof PDFLib.PDFTextField || f instanceof PDFLib.PDFDropdown || f instanceof PDFLib.PDFOptionList) f.updateAppearances(font);
+        else if (f.updateAppearances) f.updateAppearances();
+      } catch (e) { failed = true; console.warn('appearance', e); }
+    }
+    // if some could not be drawn, ask the PDF viewer to draw the fields itself
+    if (failed) { try { form.acroForm.dict.set(PDFLib.PDFName.of('NeedAppearances'), PDFLib.PDFBool.True); } catch { /* ignore */ } }
+  }
   if (form && opts.flatten) { try { form.flatten({ updateFieldAppearances: false }); } catch (e) { console.warn('flatten failed', e); } }
   return doc.save({ updateFieldAppearances: false });
 }
@@ -779,7 +958,7 @@ class PdfEditor {
       el = h('div', { class: 'ov text' + (val ? '' : ' missing'), text: b.boxes && val ? '' : text });
       if (b.boxes && val) {
         // one character in the middle of each box
-        const chars = boxChars(val.text);
+        const chars = Array.from(cellChars(b, val.text));
         el.style.width = (b.boxes[b.boxes.length - 1].x1 - b.boxes[0].x0) * s + 'px';
         el.style.height = size * s + 'px';
         b.boxes.forEach((bx, i) => {

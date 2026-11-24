@@ -500,6 +500,8 @@ const App = {
 
   // What goes into a blank: {text} or {image}
   valueOf(b) {
+    // the next row of boxes of a long answer shows the rest of the same value
+    if (b.continues) return this.valueOf(b.continues);
     // what you typed in the list wins over everything
     if (b.override != null) {
       if (!b.override.trim()) return null;
@@ -525,6 +527,8 @@ const App = {
       v = v.replace(/^(str(ada)?|bd|b-dul|bulevardul|sos(eaua)?|calea|aleea)\.?\s+/i, '');
     }
     if (!v) return null;
+    // a drawn tick box: X in the one whose word matches
+    if (b.mark) return optionMatches(b.option, v, b.key) ? { text: 'X' } : null;
     // "Banca ____" + "Banca Transilvania", "Facultății de ____" + "Facultatea de Matematică": don't repeat the word
     v = dropRepeatedWord(b.labelText ?? b.before ?? '', v);
     // English forms get English words for nationality, country and sex
@@ -542,7 +546,8 @@ const App = {
       v = vars.find((x) => textWidth(x, b.size * 0.9) <= b.maxW) || vars[vars.length - 1] || v;
     }
     // "(cu majuscule)", "in capital letters"
-    if (/majuscul|litere mari|litere de tipar|capital letters|block letters|in capitals/i.test((b.before || '') + ' ' + (b.labelText || '') + ' ' + (b.after || ''))) v = v.toLocaleUpperCase('ro');
+    const capsCtx = /(.{0,40})(majuscul|litere mari|litere de tipar|capital letters|block letters|in capitals)/i.exec((b.before || '') + ' ' + (b.labelText || '') + ' ' + (b.after || ''));
+    if (capsCtx && !/\b(not|don.t|nu|fara|fără|no need)\b/i.test(capsCtx[1])) v = v.toLocaleUpperCase('ro');
     if (b.kind === 'field' && (b.fieldType !== 'text' || b.charIndex != null || b.datePart) && b.fieldType !== 'sig') return fieldValue(b, v);
     return { text: v };
   },
@@ -738,7 +743,7 @@ const App = {
     const list = $('#blank-list');
     list.textContent = '';
     let filled = 0, unknown = 0, missing = 0;
-    const rows = s.blanks.filter((b) => !(b.optional && !b.key)).sort((a, b) => (a.page ?? 0) - (b.page ?? 0) || (b.y ?? 0) - (a.y ?? 0) || a.id - b.id);
+    const rows = s.blanks.filter((b) => !(b.optional && !b.key) && !b.continues).sort((a, b) => (a.page ?? 0) - (b.page ?? 0) || (b.y ?? 0) - (a.y ?? 0) || a.id - b.id);
     for (const b of rows) {
       let val = this.valueOf(b);
       const noPicture = val && val.image && b.canImage === false;

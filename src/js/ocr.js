@@ -254,14 +254,16 @@ function cleanScan(canvas) {
   }
 
   // 4) vertical lines (table borders)
-  const vlines = [];
-  const minV = Math.round(H * 0.03);
+  const vlines = [], shortV = [];
+  const minV = Math.round(H * 0.03), minShort = Math.round(H * 0.006);
   for (let x = 0; x < W; x++) {
     let start = -1;
     for (let y = 0; y <= H; y++) {
       const k = y < H && dark[y * W + x];
       if (k && start < 0) start = y;
       else if (!k && start >= 0) {
+        // short dividers (boxes of a one-letter-per-box row) are kept apart: only the box finder uses them
+        if (y - start >= minShort && y - start < minV) shortV.push({ x, y0: start, y1: y });
         if (y - start >= minV) {
           const l = vlines.find((q) => x - q.x1 <= 1 && start < q.y1 && y > q.y0);
           if (l) { l.x1 = x; l.y0 = Math.min(l.y0, start); l.y1 = Math.max(l.y1, y); l.area += y - start; l.sx += x * (y - start); }
@@ -283,6 +285,14 @@ function cleanScan(canvas) {
   const vert = vlines.filter((l) => l.area / Math.max(1, l.y1 - l.y0) <= Math.max(8, W / 200));
   for (const l of vert) { l.xc = l.sx / l.area; ctx.fillRect(l.x0 - 1, l.y0, l.x1 - l.x0 + 3, l.y1 - l.y0); }
   found.vertical = vert;
+  // join the short dividers column by column
+  const sv = [];
+  for (const l of shortV.sort((a, b) => a.y0 - b.y0 || a.x - b.x)) {
+    const m = sv.find((q) => l.x - q.x1 <= 1 && l.x >= q.x0 - 1 && l.y0 < q.y1 + 2 && l.y1 > q.y0 - 2);
+    if (m) { m.x1 = Math.max(m.x1, l.x); m.y0 = Math.min(m.y0, l.y0); m.y1 = Math.max(m.y1, l.y1); m.n++; }
+    else sv.push({ x0: l.x, x1: l.x, y0: l.y0, y1: l.y1, n: 1 });
+  }
+  found.shortVertical = sv.filter((l) => l.x1 - l.x0 <= Math.max(6, W / 300));
   found.debugSegs = allSegs;
   return found;
 }
@@ -350,5 +360,10 @@ async function ocrPage(pg, progress) {
   const med = sizes[sizes.length >> 1];
   if (med) for (const it of items) if (it.size < med * 1.3) it.size = med;
   for (const it of items) it.size *= 0.92; // our font runs a little larger than typical printed ones
-  return { items, rules, vrules };
+  const gridV = found.shortVertical.map((l) => {
+    const [x, ya] = vp.convertToPdfPoint((l.x0 + l.x1) / 2, l.y0);
+    const [, yb] = vp.convertToPdfPoint((l.x0 + l.x1) / 2, l.y1);
+    return { x, y0: Math.min(ya, yb), y1: Math.max(ya, yb) };
+  });
+  return { items, rules, vrules, gridV };
 }
