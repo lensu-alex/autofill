@@ -114,7 +114,7 @@ const Smart = {
     const words = (b) => String(b.labelText || b.before).replace(/\([^)]*\)/g, ' ').split(/[.;!?]\s/).pop().trim().split(/\s+/).filter(Boolean).length;
     const todo = blanks.filter((b) => (!b.key || (b.guess && !b.smart)) && (b.labelText || b.before)
       && !['check', 'radio', 'choice', 'sig'].includes(b.fieldType) && b.charIndex == null
-      && !(b.optional && words(b) > 4)); // "Label:" lines that may just be sentences
+      && !b.noSmart && !(b.optional && words(b) > 4)); // "Label:" lines that may just be sentences
     if (!todo.length) return 0;
     if (!(await this.load(progress))) return 0;
     progress && progress('Smart matching: understanding the form…');

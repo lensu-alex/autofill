@@ -47,6 +47,8 @@ function findBlanks(text, ctx = {}) {
     const rest = text.slice(at);
     if (/^[  \t]*[_.…]{3,}/.test(rest) || /^[  \t]*(\{\{|«|\[\[)/.test(rest)) continue;
     if (!rest.trim() && ctx.nextText && /^\s*[_.…]{3,}/.test(ctx.nextText)) continue;
+    // "… se face cu:" followed by a list ("1) …", "a) …", "- …") introduces the list, it is not a blank
+    if (!rest.trim() && ctx.nextText && /^\s*(\d{1,2}[.)]|[a-zA-Z][.)]|[-•–·])\s/.test(ctx.nextText)) continue;
     if (/^\s*$/.test(text.slice(0, at - 1))) continue; // a lone ":"
     if (overlaps(at, at + 1)) continue;
     out.push({ start: at, end: at, kind: 'insert' });
@@ -81,7 +83,9 @@ function assignBlank(b, compiled, opts) {
     const words = lab.split(/\s+/).filter(Boolean);
     const caps = lab.replace(/[^A-Za-zĂÂÎȘȚăâîșț]/g, '');
     if (!words.length || words.length > 7 || (words.length >= 2 && caps.length > 4 && caps === caps.toUpperCase())) return null;
-    k = classify(lab, compiled, { ...opts, window: b.window, maxTail: 3, maxLead: 2, fuzzy: words.length <= 3, fuzzyMin: 0.75 });
+    const listItem = /^\s*(\d{1,2}[.)]|[a-zA-Z][.)]|[-•–·])\s/.test(b.label);
+    k = classify(lab, compiled, { ...opts, window: b.window, maxTail: 3, maxLead: 2, fuzzy: words.length <= 3 && !listItem, fuzzyMin: 0.75 });
+    if (listItem) b.noSmart = true;
   } else k = classify(b.label, compiled, { ...opts, window: b.window });
   b.guess = !!(k && classify.lastGuess);
   if (!k) {
@@ -168,7 +172,7 @@ function tableBlanks(rows, text, compiled, opts) {
 function contextSnippet(b) {
   const before = (b.window || b.label || '').replace(/\s+/g, ' ').trimStart().slice(-48);
   const after = (b.after || '').replace(/\s+/g, ' ').slice(0, 28);
-  return { before, after, guess: !!b.guess, labelText: (b.kind === 'placeholder' ? b.name : b.label) || '' };
+  return { before, after, guess: !!b.guess, noSmart: !!b.noSmart, labelText: (b.kind === 'placeholder' ? b.name : b.label) || '' };
 }
 
 // Second look using neighbours: "domiciliat în ____, str. ____ nr. __" wants only the city
