@@ -47,7 +47,9 @@ button.danger { color: var(--bad); }
 
 .drop { border: 2px dashed #b9c2d6; border-radius: 16px; background: #fff; padding: 60px 20px; text-align: center; display: flex; flex-direction: column; gap: 12px; align-items: center; }
 .drop.over { border-color: var(--accent); background: var(--accent-2); }
-.drop.busy { opacity: .6; pointer-events: none; }
+.drop.busy { opacity: .75; pointer-events: none; position: relative; }
+.drop.busy::after { content: ''; position: absolute; top: 18px; right: 18px; width: 22px; height: 22px; border: 3px solid var(--accent-2); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .drop .big { font-size: 22px; font-weight: 600; }
 .workbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .workbar .title { display: flex; flex-direction: column; }

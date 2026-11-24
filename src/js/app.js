@@ -276,6 +276,20 @@ const App = {
     $('#save-doc').onclick = () => this.saveDoc();
     $('#save-png').onclick = () => this.saveDoc(true);
     $('#cover').onchange = () => this.editor && this.editor.drawAll();
+    // editor keys: Delete removes, arrows nudge (Shift = 10x), Escape deselects
+    document.addEventListener('keydown', (e) => {
+      const ed = this.editor, b = ed && ed.sel;
+      if (!b || /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName)) return;
+      if (e.key === 'Escape') { ed.select(null); return; }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && b.kind !== 'field') { e.preventDefault(); this.removeBlank(b); return; }
+      const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
+      if (d && b.kind !== 'field') {
+        e.preventDefault();
+        const st = e.shiftKey ? 5 : 0.5;
+        b.x += d[0] * st; b.y += d[1] * st;
+        ed.draw(b); ed.select(b);
+      }
+    });
   },
 
   closeDoc() {
