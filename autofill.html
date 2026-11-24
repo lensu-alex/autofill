@@ -2225,6 +2225,8 @@ const PH_RE = /\{\{\s*([^{}]{1,60}?)\s*\}\}|«\s*([^«»]{1,60}?)\s*»|\[\[\s*([
 // "|__|__|__|" one box per character (CNP, codes)
 const BOX_RE = /\|(?:[ _\u00a0]{1,4}\|){3,}/g;
 const FILL_RE = /[_.…][_.… \t ]*[_.…]/g;
+// a date written as three blanks: "_ _ /_ _/_ _ _ _", "__.__.____", "../../...."
+const DATE_FILL_RE = /_[_ ]*[\/.-][ ]*_[_ ]*[\/.-][ ]*_[_ ]*_|\.{2,}[ ]*[\/-][ ]*\.{2,}[ ]*[\/-][ ]*\.{2,}/g;
 // "Nume:" followed by a tab, the end of the line, or a wide gap
 const COLON_RE = /:(?=[  ]*(?:\t|$)|[  ]{3,}\S)/g;
 
@@ -2249,6 +2251,10 @@ function findBlanks(text, ctx = {}) {
     let p = m.index + 1;
     for (const part of m[0].slice(1, -1).split('|')) { cells.push([p, p + part.length]); p += part.length + 1; }
     out.push({ start: m.index, end: m.index + m[0].length, kind: 'boxes', cells });
+  }
+  for (const m of text.matchAll(DATE_FILL_RE)) {
+    if (overlaps(m.index, m.index + m[0].length)) continue;
+    out.push({ start: m.index, end: m.index + m[0].length, kind: 'filler' });
   }
   for (const m of text.matchAll(FILL_RE)) {
     let s = m.index, e = s + m[0].length, str = m[0];
@@ -2696,6 +2702,107 @@ function wordControls(doc, env, opts, where, imageAt, skip) {
   return out;
 }
 
+// Text drawn in an EMF picture (Windows metafile): EXTTEXTOUTW records with their position, width and font.
+// Returns paragraphs [{text, bold, center}], or null when the picture holds no real text.
+function emfParagraphs(buf) {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  if (buf.byteLength < 88 || dv.getUint32(0, true) !== 1 || dv.getUint32(40, true) !== 0x464d4520) return null;
+  const fonts = {}, runs = [];
+  let bold = false;
+  for (let i = 0; i + 8 <= buf.byteLength;) {
+    const type = dv.getUint32(i, true), size = dv.getUint32(i + 4, true);
+    if (size < 8 || i + size > buf.byteLength) break;
+    if (type === 82) fonts[dv.getUint32(i + 8, true)] = dv.getInt32(i + 28, true) >= 600; // EXTCREATEFONTINDIRECTW: weight
+    else if (type === 37) { const h = dv.getUint32(i + 8, true); if (h in fonts) bold = fonts[h]; } // SELECTOBJECT
+    else if (type === 84 && size >= 76) { // EXTTEXTOUTW
+      const x = dv.getInt32(i + 36, true), y = dv.getInt32(i + 40, true);
+      const n = dv.getUint32(i + 44, true), off = dv.getUint32(i + 48, true), offDx = dv.getUint32(i + 72, true);
+      if (n && off + 2 * n <= size) {
+        let text = '';
+        for (let k = 0; k < n; k++) text += String.fromCharCode(dv.getUint16(i + off + 2 * k, true));
+        let w = 0;
+        if (offDx && offDx + 4 * n <= size) for (let k = 0; k < n; k++) w += dv.getInt32(i + offDx + 4 * k, true);
+        runs.push({ x, y, w, text, bold });
+      }
+    }
+    if (type === 14) break; // EOF
+    i += size;
+  }
+  if (runs.map((r) => r.text).join('').trim().length < 40) return null;
+  // runs on the same baseline make one line, left to right
+  runs.sort((a, b) => a.y - b.y || a.x - b.x);
+  const lines = [];
+  for (const r of runs) {
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(last.y - r.y) <= 2) last.runs.push(r);
+    else lines.push({ y: r.y, runs: [r] });
+  }
+  for (const l of lines) {
+    l.runs.sort((a, b) => a.x - b.x);
+    l.text = l.runs.map((r) => r.text).join('');
+    l.left = l.runs[0].x;
+    l.right = Math.max(...l.runs.map((r) => r.x + r.w));
+    const t = l.runs.filter((r) => r.text.trim());
+    l.bold = t.length > 0 && t.every((r) => r.bold);
+  }
+  const textLines = lines.filter((l) => l.text.trim());
+  const minLeft = Math.min(...textLines.map((l) => l.left)), maxRight = Math.max(...textLines.map((l) => l.right));
+  const width = Math.max(1, maxRight - minLeft);
+  // a line that reaches the right margin was wrapped: the next line continues the same paragraph
+  const paras = [];
+  let cur = null;
+  for (const l of lines) {
+    if (!l.text.trim()) { cur = null; paras.push({ text: '', bold: false, center: false }); continue; }
+    if (cur && cur.wraps && cur.bold === l.bold) {
+      cur.text = cur.text.replace(/\s*$/, ' ') + l.text.replace(/^\s+/, '');
+    } else {
+      cur = { text: l.text, bold: l.bold, center: l.left - minLeft > 0.08 * width };
+      paras.push(cur);
+    }
+    cur.wraps = maxRight - l.right < 0.12 * width;
+    if (l.left - minLeft > 0.08 * width) cur.center = true;
+  }
+  // a bold heading at the top is centred as a whole
+  for (const p of paras) { if (!p.text) continue; if (!p.bold) break; p.center = true; }
+  while (paras.length && !paras[paras.length - 1].text) paras.pop();
+  return paras.map(({ text, bold, center }) => ({ text: text.replace(/\s+$/, ''), bold, center }));
+}
+
+// A form pasted into Word as a picture (EMF) has no text for the blank finder: put its text back as paragraphs
+async function wordEmfToText(zip, part) {
+  const doc = part.xml, W = NS.w;
+  const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const target = {};
+  for (const r of part.rels.getElementsByTagNameNS(NS.rel, 'Relationship')) target[r.getAttribute('Id')] = r.getAttribute('Target') || '';
+  for (const p of [...doc.getElementsByTagNameNS(W, 'p')]) {
+    if ([...p.getElementsByTagNameNS(W, 't')].some((t) => t.textContent.trim())) continue;
+    const refs = [...p.getElementsByTagNameNS(NS.a, 'blip')].map((b) => b.getAttributeNS(R, 'embed'))
+      .concat([...p.getElementsByTagNameNS('urn:schemas-microsoft-com:vml', 'imagedata')].map((b) => b.getAttributeNS(R, 'id')))
+      .filter(Boolean);
+    if (refs.length !== 1 || !/\.emf$/i.test(target[refs[0]] || '')) continue;
+    const t = target[refs[0]];
+    const f = zip.file(t.startsWith('/') ? t.slice(1) : 'word/' + t.replace(/^\.\//, ''));
+    const paras = f && emfParagraphs(await f.async('uint8array'));
+    if (!paras) continue;
+    for (const para of paras) {
+      const np = doc.createElementNS(W, 'w:p');
+      if (para.center) {
+        const pPr = doc.createElementNS(W, 'w:pPr'), jc = doc.createElementNS(W, 'w:jc');
+        jc.setAttributeNS(W, 'w:val', 'center');
+        pPr.appendChild(jc);
+        np.appendChild(pPr);
+      }
+      if (para.text) {
+        let rPr = null;
+        if (para.bold) { rPr = doc.createElementNS(W, 'w:rPr'); rPr.appendChild(doc.createElementNS(W, 'w:b')); }
+        np.appendChild(wMakeRun(doc, para.text, rPr));
+      }
+      p.parentNode.insertBefore(np, p);
+    }
+    p.parentNode.removeChild(p);
+  }
+}
+
 async function processDocx(bytes, env) {
   const zip = await JSZip.loadAsync(bytes);
   const names = Object.keys(zip.files)
@@ -2704,7 +2811,6 @@ async function processDocx(bytes, env) {
   if (!names.includes('word/document.xml')) throw new Error('This does not look like a Word document');
   const parts = [];
   for (const name of names) parts.push({ name, xml: parseXml(await zip.file(name).async('string')) });
-  const opts = { docHasPrenume: /prenume/.test(norm(parts.map((p) => p.xml.documentElement.textContent).join(' '))) };
   let usedImage = false;
 
   // Relationship files are loaded up front so images can be inserted synchronously
@@ -2715,6 +2821,8 @@ async function processDocx(bytes, env) {
     part.relsPath = path;
     part.rels = parseXml(f ? await f.async('string') : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${NS.rel}"/>`);
   }
+  await wordEmfToText(zip, parts[0]);
+  const opts = { docHasPrenume: /prenume/.test(norm(parts.map((p) => p.xml.documentElement.textContent).join(' '))) };
   function relFor(part) {
     if (part.rid) return part.rid;
     const rels = part.rels;

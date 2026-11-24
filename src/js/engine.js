@@ -5,6 +5,8 @@ const PH_RE = /\{\{\s*([^{}]{1,60}?)\s*\}\}|«\s*([^«»]{1,60}?)\s*»|\[\[\s*([
 // "|__|__|__|" one box per character (CNP, codes)
 const BOX_RE = /\|(?:[ _\u00a0]{1,4}\|){3,}/g;
 const FILL_RE = /[_.…][_.… \t ]*[_.…]/g;
+// a date written as three blanks: "_ _ /_ _/_ _ _ _", "__.__.____", "../../...."
+const DATE_FILL_RE = /_[_ ]*[\/.-][ ]*_[_ ]*[\/.-][ ]*_[_ ]*_|\.{2,}[ ]*[\/-][ ]*\.{2,}[ ]*[\/-][ ]*\.{2,}/g;
 // "Nume:" followed by a tab, the end of the line, or a wide gap
 const COLON_RE = /:(?=[  ]*(?:\t|$)|[  ]{3,}\S)/g;
 
@@ -29,6 +31,10 @@ function findBlanks(text, ctx = {}) {
     let p = m.index + 1;
     for (const part of m[0].slice(1, -1).split('|')) { cells.push([p, p + part.length]); p += part.length + 1; }
     out.push({ start: m.index, end: m.index + m[0].length, kind: 'boxes', cells });
+  }
+  for (const m of text.matchAll(DATE_FILL_RE)) {
+    if (overlaps(m.index, m.index + m[0].length)) continue;
+    out.push({ start: m.index, end: m.index + m[0].length, kind: 'filler' });
   }
   for (const m of text.matchAll(FILL_RE)) {
     let s = m.index, e = s + m[0].length, str = m[0];
