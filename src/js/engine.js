@@ -204,3 +204,11 @@ function applySections(blanks) {
     if (OTHER_SECTION.test(n) && !SELF_SECTION.test(n)) { b.key = null; b.guess = false; b.otherPerson = true; }
   }
 }
+
+// Nearest non-empty text before/after position i (labels can sit a few empty paragraphs away)
+function neighbours(texts, i) {
+  let p = i - 1, n = i + 1;
+  while (p >= 0 && !texts[p].trim()) p--;
+  while (n < texts.length && !texts[n].trim()) n++;
+  return { prevText: p >= 0 ? texts[p] : '', nextText: n < texts.length ? texts[n] : '' };
+}

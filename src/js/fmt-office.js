@@ -36,7 +36,7 @@ function paragraphBlanks(paras, segsOf, env, opts, where, insertImage, skipInser
     if (!texts[i].trim()) return;
     const segs = segsOf(p);
     const text = texts[i];
-    for (const b of findBlanks(text, { prevText: texts[i - 1] || '', nextText: texts[i + 1] || '' })) {
+    for (const b of findBlanks(text, neighbours(texts, i))) {
       if (b.kind === 'insert' && skipInsert && skipInsert(p)) continue;
       const key = assignBlank(b, env.compiled, opts);
       const optional = b.kind === 'insert' && !key; // "Note:" etc. — hidden unless smart matching knows it

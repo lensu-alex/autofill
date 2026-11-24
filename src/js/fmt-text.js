@@ -15,7 +15,7 @@ async function processText(bytes, env, ext) {
   const blanks = [];
   const sections = sectionsOf(textLines);
   textLines.forEach((line, li) => {
-    for (const b of findBlanks(line, { prevText: textLines[li - 1] || '', nextText: textLines[li + 1] || '' })) {
+    for (const b of findBlanks(line, neighbours(textLines, li))) {
       const key = assignBlank(b, env.compiled, opts);
       const optional = b.kind === 'insert' && !key;
       blanks.push({ key, optional, ...contextSnippet(b), where: 'line ' + (li + 1), kind: b.kind, canImage: false, section: sections[li],
@@ -83,7 +83,7 @@ async function processHtml(bytes, env) {
     const text = texts[i];
     if (!text.trim()) return;
     const segs = segsOf(nodes);
-    for (const b of findBlanks(text, { prevText: texts[i - 1] || '', nextText: texts[i + 1] || '' })) {
+    for (const b of findBlanks(text, neighbours(texts, i))) {
       const key = assignBlank(b, env.compiled, opts);
       const optional = b.kind === 'insert' && !key;
       blanks.push({ key, optional, ...contextSnippet(b), where: 'page text', kind: b.kind, canImage: true, section: sections[i],

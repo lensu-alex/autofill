@@ -115,7 +115,7 @@ function fontWidths(pg, fontName, cache) {
 
 // Horizontal lines drawn on the page (blanks made with lines instead of "____")
 function drawnLines(opl) {
-  const O = pdfjsLib.OPS, out = [];
+  const O = pdfjsLib.OPS, out = [], vert = [];
   let ctm = [1, 0, 0, 1, 0, 0];
   const stack = [];
   const mul = (m, n) => [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
@@ -123,6 +123,7 @@ function drawnLines(opl) {
   const seg = (a, b) => {
     const [x0, y0] = ap(...a), [x1, y1] = ap(...b);
     if (Math.abs(y0 - y1) < 0.8 && Math.abs(x1 - x0) > 25) out.push({ x0: Math.min(x0, x1), x1: Math.max(x0, x1), y: (y0 + y1) / 2 });
+    else if (Math.abs(x0 - x1) < 0.8 && Math.abs(y1 - y0) > 6) vert.push({ x: (x0 + x1) / 2, y0: Math.min(y0, y1), y1: Math.max(y0, y1) });
   };
   for (let i = 0; i < opl.fnArray.length; i++) {
     const fn = opl.fnArray[i], args = opl.argsArray[i];
@@ -140,7 +141,13 @@ function drawnLines(opl) {
         else if (op === O.rectangle) {
           const [x, y, w, hh] = c.slice(j, j + 4); j += 4;
           const [ax, ay] = ap(x, y), [bx, by] = ap(x + w, y + hh);
-          if (Math.abs(by - ay) < 2 && Math.abs(bx - ax) > 25) out.push({ x0: Math.min(ax, bx), x1: Math.max(ax, bx), y: (ay + by) / 2 });
+          const X0 = Math.min(ax, bx), X1 = Math.max(ax, bx), Y0 = Math.min(ay, by), Y1 = Math.max(ay, by);
+          if (Y1 - Y0 < 2 && X1 - X0 > 25) out.push({ x0: X0, x1: X1, y: (Y0 + Y1) / 2 });
+          else if (X1 - X0 < 2 && Y1 - Y0 > 6) vert.push({ x: (X0 + X1) / 2, y0: Y0, y1: Y1 });
+          else if (X1 - X0 > 6 && Y1 - Y0 > 6) { // a box: its four sides
+            out.push({ x0: X0, x1: X1, y: Y0 }, { x0: X0, x1: X1, y: Y1 });
+            vert.push({ x: X0, y0: Y0, y1: Y1 }, { x: X1, y0: Y0, y1: Y1 });
+          }
         }
         else if (op === O.curveTo) j += 6;
         else if (op === O.curveTo2 || op === O.curveTo3) j += 4;
@@ -154,6 +161,13 @@ function drawnLines(opl) {
     const m = merged.find((x) => Math.abs(x.y - l.y) < 0.6 && l.x0 <= x.x1 + 1 && l.x1 >= x.x0 - 1);
     if (m) { m.x0 = Math.min(m.x0, l.x0); m.x1 = Math.max(m.x1, l.x1); } else merged.push({ ...l });
   }
+  vert.sort((a, b) => a.x - b.x || a.y0 - b.y0);
+  const vmerged = [];
+  for (const l of vert) {
+    const m = vmerged.find((x) => Math.abs(x.x - l.x) < 0.6 && l.y0 <= x.y1 + 1 && l.y1 >= x.y0 - 1);
+    if (m) { m.y0 = Math.min(m.y0, l.y0); m.y1 = Math.max(m.y1, l.y1); } else vmerged.push({ ...l });
+  }
+  merged.vertical = vmerged;
   return merged;
 }
 
@@ -257,7 +271,7 @@ async function processPdf(bytes, env, meta = {}) {
         items = r.items; rules = rules.concat(r.rules); ocr = true;
       } catch (e) { console.warn('OCR failed', e); }
     }
-    pages.push({ pg, view: pg.view, items, lines: buildLines(items), rules, ocr });
+    pages.push({ pg, view: pg.view, items, lines: buildLines(items), rules, vrules: rules.vertical || [], ocr });
   }
   const allText = pages.map((p) => p.items.map((i) => i.str).join(' ')).join(' ');
   const opts = { docHasPrenume: /prenume/.test(norm(allText)) };
@@ -455,6 +469,49 @@ async function processPdf(bytes, env, meta = {}) {
         before: label.replace(/\s+/g, ' ').trim().slice(-48), after: place === 'over' ? '(line)' : '', where: 'page ' + (pi + 1), canImage: true };
       if (key === 'signature') { it.kind = 'image'; it.h = clamp(size * 2.8, 22, 44); it.w = Math.min(it.h * sig.w / sig.h, r.x1 - r.x0); it.h = it.w * sig.h / sig.w; it.y = r.y - 2; }
       blanks.push(it);
+    }
+  });
+
+  // 4) Drawn tables: a label cell with an empty cell to its right (or below it)
+  pages.forEach((P, pi) => {
+    const V = P.vrules, H = P.rules;
+    if (!V.length || !H.length) return;
+    const vAt = (y) => V.filter((v) => v.y0 - 1 <= y && v.y1 + 1 >= y).map((v) => v.x).sort((a, b) => a - b);
+    const hAt = (x) => H.filter((r) => r.x0 - 1 <= x && r.x1 + 1 >= x).map((r) => r.y).sort((a, b) => a - b);
+    const emptyRect = (x0, y0, x1, y1) => !P.items.some((it) => { const cx = it.x + it.w / 2, cy = it.y + it.size * 0.3; return it.str.trim() && cx > x0 && cx < x1 && cy > y0 && cy < y1; });
+    for (const l of P.lines) {
+      const xs = vAt(l.y + l.size * 0.3);
+      if (xs.length < 2) continue;
+      for (let c = 0; c < xs.length - 1; c++) {
+        const left = xs[c], right = xs[c + 1];
+        if (right - left < 15) continue;
+        const text = l.str.split('').filter((_, i) => l.chars[i] && (l.chars[i].x0 + l.chars[i].x1) / 2 > left && (l.chars[i].x0 + l.chars[i].x1) / 2 < right).join('').trim();
+        if (!text || text.length > 60 || findBlanks(text).some((b) => b.kind !== 'insert')) continue;
+        const key = classify(text, env.compiled, { ...opts, maxTail: 14, fuzzyMin: 0.75 });
+        if (!key) continue;
+        const ys = hAt((left + right) / 2);
+        const top = ys.find((y) => y > l.y + l.size * 0.5), bottom = [...ys].reverse().find((y) => y < l.y + 1);
+        if (top == null || bottom == null) continue;
+        let cell = null;
+        const right2 = vAt((top + bottom) / 2).find((x) => x > right + 8);
+        if (right2 != null && emptyRect(right + 1, bottom + 1, right2 - 1, top - 1)) cell = { x0: right, x1: right2, y0: bottom, y1: top };
+        if (!cell) {
+          const bottom2 = [...hAt((left + right) / 2)].reverse().find((y) => y < bottom - 6);
+          if (bottom2 != null && emptyRect(left + 1, bottom2 + 1, right - 1, bottom - 1)) cell = { x0: left, x1: right, y0: bottom2, y1: bottom };
+        }
+        if (!cell) continue;
+        if (blanks.some((b) => b.page === pi && b.x >= cell.x0 - 2 && b.x <= cell.x1 && b.y >= cell.y0 - 2 && b.y <= cell.y1)) continue;
+        if (inWidget(pi, cell.x0 + 2, cell.y0 + 2, cell.x1 - 2, cell.y1 - 2)) continue;
+        const size = clamp(Math.max(l.size, 10), 7, Math.max(7, Math.min(12, (cell.y1 - cell.y0) * 0.6)));
+        const it = { kind: 'text', page: pi, key, x: cell.x0 + 3, y: cell.y0 + (cell.y1 - cell.y0) / 2 - size * 0.35, size, maxW: cell.x1 - cell.x0 - 6,
+          cover: null, before: text, labelText: text, after: '', where: 'page ' + (pi + 1) + ' · table', canImage: true };
+        if (key === 'signature') {
+          it.kind = 'image';
+          it.h = clamp((cell.y1 - cell.y0) - 4, 14, 44); it.w = Math.min(it.h * sig.w / sig.h, cell.x1 - cell.x0 - 6); it.h = it.w * sig.h / sig.w;
+          it.y = cell.y0 + ((cell.y1 - cell.y0) - it.h) / 2;
+        }
+        blanks.push(it);
+      }
     }
   });
 
