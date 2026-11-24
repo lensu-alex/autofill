@@ -104,3 +104,89 @@ async function processHtml(bytes, env) {
     async finish() { return new Blob(['<!DOCTYPE html>\n' + doc.documentElement.outerHTML], { type: 'text/html;charset=utf-8' }); },
   };
 }
+
+/* ---------------- RTF ---------------- */
+// Reads the visible text of an RTF file paragraph by paragraph, remembering where each character
+// sits in the raw file, so blanks can be found in clean text and replaced in the original.
+const RTF_SKIP = new Set(['fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'object', 'listtable', 'listoverridetable', 'rsidtbl', 'generator', 'themedata', 'colorschememapping', 'datastore', 'latentstyles', 'xmlnstbl', 'fldinst']);
+
+function rtfParse(raw) {
+  const paras = [];
+  let cur = { text: '', map: [] };
+  const push = () => { paras.push(cur); cur = { text: '', map: [] }; };
+  const cpm = /\\ansicpg(\d+)/.exec(raw);
+  const cp = new TextDecoder(cpm ? 'windows-' + cpm[1] : 'windows-1252');
+  const stack = [];
+  let skip = false, uc = 1, pendingSkip = 0, i = 0;
+  const add = (ch, a, b) => { if (skip) return; if (pendingSkip > 0) { pendingSkip--; return; } cur.text += ch; cur.map.push([a, b]); };
+  while (i < raw.length) {
+    const c = raw[i];
+    if (c === '{') { stack.push({ skip, uc }); i++; if (raw.startsWith('\\*', i)) skip = true; continue; }
+    if (c === '}') { const st = stack.pop() || { skip: false, uc: 1 }; skip = st.skip; uc = st.uc; i++; continue; }
+    if (c === '\r' || c === '\n') { i++; continue; }
+    if (c !== '\\') { add(c, i, i + 1); i++; continue; }
+    const n = raw[i + 1];
+    if (n === '\\' || n === '{' || n === '}') { add(n, i, i + 2); i += 2; continue; }
+    if (n === "'") { const byte = parseInt(raw.substr(i + 2, 2), 16); add(cp.decode(new Uint8Array([byte])), i, i + 4); i += 4; continue; }
+    if (n === '~') { add(' ', i, i + 2); i += 2; continue; }
+    if (n === '_') { add('-', i, i + 2); i += 2; continue; }
+    if (n === '\n' || n === '\r') { if (!skip) push(); i += 2; continue; }
+    const m = /^\\([a-zA-Z]+)(-?\d+)? ?/.exec(raw.slice(i, i + 40));
+    if (!m) { i += 2; continue; }
+    const word = m[1], param = m[2] != null ? +m[2] : null, end = i + m[0].length;
+    if (RTF_SKIP.has(word)) skip = true;
+    else if (word === 'uc') uc = param ?? 1;
+    else if (word === 'u') { add(String.fromCharCode(param < 0 ? param + 65536 : param), i, end); pendingSkip = skip ? 0 : uc; i = end;
+      // the fallback characters after \uN belong to it
+      let k = 0, j = end;
+      while (k < uc && j < raw.length) { if (raw[j] === '\\' && raw[j + 1] === "'") j += 4; else if (raw[j] === '\\' || raw[j] === '{' || raw[j] === '}') break; else j++; k++; }
+      if (cur.map.length && !skip) cur.map[cur.map.length - 1][1] = j;
+      pendingSkip = 0; i = j; continue; }
+    else if (!skip && (word === 'par' || word === 'line' || word === 'cell' || word === 'row' || word === 'sect' || word === 'page')) push();
+    else if (!skip && word === 'tab') add('\t', i, end);
+    i = end;
+  }
+  push();
+  return paras;
+}
+
+function rtfEscapeText(s) {
+  let out = '';
+  for (const ch of s) {
+    const n = ch.codePointAt(0);
+    if (ch === '\\' || ch === '{' || ch === '}') out += '\\' + ch;
+    else if (n < 128) out += ch;
+    else if (n < 65536) out += `{\\uc1\\u${n > 32767 ? n - 65536 : n}?}`;
+  }
+  return out;
+}
+
+async function processRtf(bytes, env) {
+  let raw = new TextDecoder('latin1').decode(bytes);
+  const paras = rtfParse(raw);
+  const texts = paras.map((p) => p.text);
+  const sections = sectionsOf(texts);
+  const opts = { docHasPrenume: /prenume/.test(norm(texts.join(' '))) };
+  const blanks = [];
+  const edits = [];
+  paras.forEach((p, i) => {
+    if (!p.text.trim()) return;
+    for (const b of findBlanks(p.text, neighbours(texts, i))) {
+      const key = assignBlank(b, env.compiled, opts);
+      const optional = b.kind === 'insert' && !key;
+      const rawStart = b.end > b.start ? p.map[b.start][0] : (p.map[b.start - 1] || [0, 0])[1];
+      const rawEnd = b.end > b.start ? p.map[b.end - 1][1] : rawStart;
+      blanks.push({ key, optional, ...contextSnippet(b), where: 'paragraph ' + (i + 1), kind: b.kind, canImage: false, section: sections[i],
+        apply(val) { if (val.text != null) edits.push({ rawStart, rawEnd, text: rtfEscapeText(fillValue(p.text, b, val.text)) }); } });
+    }
+  });
+  return {
+    blanks,
+    async finish() {
+      for (const e of edits.sort((a, b) => b.rawStart - a.rawStart)) raw = raw.slice(0, e.rawStart) + e.text + raw.slice(e.rawEnd);
+      const out = new Uint8Array(raw.length);
+      for (let k = 0; k < raw.length; k++) out[k] = raw.charCodeAt(k) & 0xff;
+      return new Blob([out], { type: 'application/rtf' });
+    },
+  };
+}

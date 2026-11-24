@@ -7,7 +7,7 @@ const OFFICE = {
   pptx: processPptx,
   xlsx: processXlsx, xlsm: processXlsx,
   html: processHtml, htm: processHtml,
-  txt: processText, md: processText, csv: processText, tsv: processText, rtf: processText, text: processText,
+  txt: processText, md: processText, csv: processText, tsv: processText, rtf: processRtf, text: processText,
 };
 const IMAGES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', tif: 'image/tiff', tiff: 'image/tiff', avif: 'image/avif' };
 const APPLE = { pages: 'Pages', numbers: 'Numbers', key: 'Keynote' };
@@ -594,13 +594,15 @@ const App = {
     let filled = 0, unknown = 0, missing = 0;
     const rows = s.blanks.filter((b) => !(b.optional && !b.key)).sort((a, b) => (a.page ?? 0) - (b.page ?? 0) || (b.y ?? 0) - (a.y ?? 0) || a.id - b.id);
     for (const b of rows) {
-      const val = this.valueOf(b);
+      let val = this.valueOf(b);
+      const noPicture = val && val.image && b.canImage === false;
+      if (noPicture) val = null;
       if (val || (!val && b.fieldType === 'check' && b.key && this.values[b.key])) filled++; else if (!b.key) unknown++; else missing++;
       const unticked = !val && b.fieldType === 'check' && b.key && this.values[b.key];
-      const status = val || unticked ? 'ok' : b.key ? 'missing' : 'unknown';
+      const status = val || unticked || noPicture ? 'ok' : b.key ? 'missing' : 'unknown';
       const tooLong = val?.text && b.kind === 'text' && b.maxW > 10 && textWidth(val.text, b.size * 0.72) > b.maxW * 1.05;
       const preview = val ? (val.image ? h('img', { src: val.image.dataUrl, class: 'sigthumb' }) : h('span', { text: val.text }))
-        : h('span', { class: 'muted', text: unticked ? '☐ stays unticked' : b.key ? (b.key === 'signature' ? 'no signature saved' : 'empty in your info') : 'not filled' });
+        : h('span', { class: 'muted', text: noPicture ? '✍︎ sign by hand (this file type can\'t hold a picture)' : unticked ? '☐ stays unticked' : b.key ? (b.key === 'signature' ? 'no signature saved' : 'empty in your info') : 'not filled' });
       const row = h('div', { class: 'row ' + status + (b.guess && val ? ' guess' : ''), 'data-id': b.id },
         h('div', { class: 'ctx' },
           b.where ? h('span', { class: 'where', text: b.where }) : null,
