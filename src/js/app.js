@@ -507,7 +507,8 @@ const App = {
     // dates follow the format the form asks for, otherwise the one in Settings
     if (/^(birth_date|today|id_issue_date|id_expiry_date)$/.test(b.key)) {
       const d = parseDate(v);
-      const fmt = dateHint((b.labelText ?? b.before ?? '') + ' ' + (b.after || '').slice(0, 20)) || this.settings().dateFormat;
+      const fmt = b.boxes ? (b.boxes.length === 6 ? 'dd.mm.yy' : 'dd.mm.yyyy') // one digit per box
+        : dateHint((b.labelText ?? b.before ?? '') + ' ' + (b.after || '').slice(0, 20)) || this.settings().dateFormat;
       if (d && fmt) v = formatDate(new Date(d.y, d.m - 1, d.d), fmt);
     }
     // a long address in a short printed blank: use the longest shorter form that fits

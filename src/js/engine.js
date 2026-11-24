@@ -179,6 +179,10 @@ function contextSnippet(b) {
 // in the first blank, because the street comes separately.
 function refineKeys(blanks) {
   applySections(blanks);
+  // "seria ____ nr. ____": a nameless blank right after the ID series is the ID number
+  blanks.forEach((b, i) => {
+    if (!b.key && i > 0 && blanks[i - 1].key === 'id_series' && b.kind !== 'field' && !b.otherPerson) { b.key = 'id_number'; b.guess = true; }
+  });
   blanks.forEach((b, i) => {
     if (b.key !== 'address') return;
     const next = blanks.slice(i + 1, i + 4);

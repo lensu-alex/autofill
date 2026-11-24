@@ -28,7 +28,7 @@ const FIELD_DEFS = [
   { key: 'id_number', group: 'id', label: 'ID number · Număr', syn: ['numar ci', 'nr ci', 'numarul ci', 'passport number', 'passport no', 'document number', 'numar document', 'nr document', 'numar pasaport', 'nr pasaport', 'id card number', 'id number', 'id no'] },
   { key: 'id_issued_by', group: 'id', label: 'Issued by · Eliberat de', syn: ['eliberat de', 'eliberata de', 'emis de', 'emisa de', 'issued by', 'issuing authority', 'autoritatea emitenta'] },
   { key: 'id_issue_date', group: 'id', label: 'Issue date · Data eliberării', syn: ['data eliberarii', 'eliberat la data de', 'eliberat la data', 'date of issue', 'issue date', 'issued on'] },
-  { key: 'id_expiry_date', group: 'id', label: 'Valid until · Valabil până la', syn: ['valabil pana la', 'valabila pana la', 'data expirarii', 'expiry date', 'expiration date', 'valid until', 'date of expiry'] },
+  { key: 'id_expiry_date', group: 'id', label: 'Valid until · Valabil până la', syn: ['valabil pana la', 'valabila pana la', 'valabilitatea', 'valabilitate', 'valabilitatea actului', 'data expirarii', 'expiry date', 'expiration date', 'valid until', 'date of expiry'] },
 
   { key: 'street', group: 'address', label: 'Street · Strada', syn: ['strada', 'str', 'street', 'bulevardul', 'bd', 'b dul', 'soseaua', 'sos', 'calea', 'aleea', 'splaiul'] },
   { key: 'street_number', group: 'address', label: 'Street number · Nr.', syn: ['numar strada', 'nr strada', 'street number', 'house number', 'house no'] },

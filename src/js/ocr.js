@@ -164,7 +164,9 @@ function cleanScan(canvas) {
     if (chain.length >= 6 && regular && dots[chain[chain.length - 1]].x1 - dots[chain[0]].x0 >= W * 0.03) {
       chain.forEach((k) => { used[k] = 1; });
       const ds = chain.map((k) => dots[k]);
-      found.push({ x0: ds[0].x0, x1: ds[ds.length - 1].x1, y0: Math.min(...ds.map((q) => q.y0)), y1: Math.max(...ds.map((q) => q.y1)) });
+      const left = ds.slice(0, Math.max(3, Math.ceil(ds.length / 4))); // a tilted line: its height where text starts
+      found.push({ x0: ds[0].x0, x1: ds[ds.length - 1].x1, y0: Math.min(...left.map((q) => q.y0)), y1: Math.max(...left.map((q) => q.y1)),
+        ey0: Math.min(...ds.map((q) => q.y0)), ey1: Math.max(...ds.map((q) => q.y1)) }); // ey: the whole line, for erasing
     }
   }
 
@@ -195,15 +197,47 @@ function cleanScan(canvas) {
   const usedSeg = new Set();
   for (let i = 0; i < joined.length; i++) {
     if (usedSeg.has(i)) continue;
-    const row = [joined[i]];
+    const row = [joined[i]], rowIdx = [];
     let maxLen = joined[i].x1 - joined[i].x0;
     for (let j = i + 1; j < joined.length; j++) {
       const a = row[row.length - 1], c = joined[j];
       if (usedSeg.has(j) || Math.abs(c.y0 - a.y0) > 4) continue;
       if (c.x0 - a.x1 > Math.max(maxLen * 0.9, W * 0.004)) break;
       if (c.x1 - c.x0 < maxLen * 0.3) continue;
-      row.push(c); usedSeg.add(j);
+      row.push(c); rowIdx.push(j);
       maxLen = Math.max(maxLen, c.x1 - c.x0);
+    }
+    // pieces are only taken once the row is accepted (a date row may still need them)
+    if (row.length >= 5) rowIdx.forEach((j) => usedSeg.add(j));
+    if (row.length < 5) {
+      // dates written as "_ _ /_ _ /_ _ _ _": the slashes make bigger gaps, so try again with more room
+      const r2 = [joined[i]];
+      let ml = joined[i].x1 - joined[i].x0;
+      for (let j = i + 1; j < joined.length; j++) {
+        const a = r2[r2.length - 1], c = joined[j];
+        if (usedSeg.has(j) || Math.abs(c.y0 - a.y0) > 4) continue;
+        if (c.x0 - a.x1 > Math.max(ml * 2.6, W * 0.01)) break;
+        if (c.x1 - c.x0 < ml * 0.3 || c.x1 - c.x0 > ml * 3) continue;
+        r2.push(c); ml = Math.max(ml, c.x1 - c.x0);
+      }
+      // groups between the slashes: 2-2-4 is dd/mm/yyyy; 2-4 means the day boxes were lost (touching a word): add them back
+      if (r2.length === 6) {
+        const gaps = r2.slice(1).map((q, k) => q.x0 - r2[k].x1);
+        const small = [...gaps].sort((a, b) => a - b)[1];
+        const cuts = gaps.map((g, k) => (g > small * 1.8 ? k : -1)).filter((k) => k >= 0);
+        if (cuts.length === 1 && cuts[0] === 1) {
+          const pitch = r2[1].x0 - r2[0].x0, slash = r2[2].x0 - r2[1].x1, w = r2[0].x1 - r2[0].x0;
+          const x1 = r2[0].x0 - slash, x0 = x1 - pitch;
+          r2.unshift({ ...r2[0], x0: x1 - w, x1 }, { ...r2[0], x0: x0 - w, x1: x0 });
+          r2.sort((a, b) => a.x0 - b.x0);
+        }
+      }
+      if (r2.length === 8 || r2.length === 6) {
+        r2.forEach((q) => usedSeg.add(joined.indexOf(q)));
+        found.push({ x0: r2[0].x0, x1: r2[r2.length - 1].x1, y0: Math.min(...r2.map((q) => q.y0)), y1: Math.max(...r2.map((q) => q.y1)),
+          cells: r2.map((q) => [q.x0, q.x1]), date: true });
+        continue;
+      }
     }
     if (row.length >= 5) {
       usedSeg.add(i);
@@ -242,7 +276,7 @@ function cleanScan(canvas) {
   ctx.fillStyle = '#fff';
   for (const f of found) {
     if (f.runs) for (const r of f.runs) ctx.fillRect(r.x0 - 1, r.y - 2, r.x1 - r.x0 + 3, 5);
-    else ctx.fillRect(f.x0 - 1, f.y0 - 2, f.x1 - f.x0 + 3, f.y1 - f.y0 + 5);
+    else { const y0 = f.ey0 ?? f.y0, y1 = f.ey1 ?? f.y1; ctx.fillRect(f.x0 - 1, y0 - 2, f.x1 - f.x0 + 3, y1 - y0 + 5); }
     for (const b of f.bars || []) ctx.fillRect(b.x0 - 1, f.y0 - W * 0.03, b.x1 - b.x0 + 3, W * 0.03);
   }
   // thickness = dark area / length (works for slightly slanted lines too)
@@ -274,7 +308,7 @@ async function ocrPage(pg, progress) {
     const [x0, y] = vp.convertToPdfPoint(f.x0, f.y1);
     const [x1] = vp.convertToPdfPoint(f.x1, f.y1);
     const r = { x0: Math.min(x0, x1), x1: Math.max(x0, x1), y };
-    if (f.cells) { r.cells = f.cells.map(([a, z]) => [vp.convertToPdfPoint(a, f.y1)[0], vp.convertToPdfPoint(z, f.y1)[0]]); rules.push(r); continue; }
+    if (f.cells) { r.cells = f.cells.map(([a, z]) => [vp.convertToPdfPoint(a, f.y1)[0], vp.convertToPdfPoint(z, f.y1)[0]]); r.date = !!f.date; rules.push(r); continue; }
     // pieces of the same line join up
     const m = rules.find((q) => Math.abs(q.y - r.y) < 3 && r.x0 - q.x1 < 12 && r.x1 > q.x0 - 12);
     if (m && !m.cells) { m.x0 = Math.min(m.x0, r.x0); m.x1 = Math.max(m.x1, r.x1); m.y = Math.min(m.y, r.y); } else rules.push(r);

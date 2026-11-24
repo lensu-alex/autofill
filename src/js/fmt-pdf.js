@@ -483,29 +483,50 @@ async function processPdf(bytes, env, meta = {}) {
         const same = blanks.find((b) => b.page === pi && b.boxes && Math.abs(b.y - r.y) < 14 && b.x < r.x1 && b.x + 20 > r.x0 - 30);
         if (same) { same.boxes = r.cells.map(([a, z]) => ({ x0: a, x1: z })); same.x = r.x0; same.y = r.y + 2; continue; }
       }
-      const taken = blanks.some((b) => b.page === pi && b.kind !== 'field' && Math.abs(b.y - r.y) < 14 && b.x >= r.x0 - 40 && b.x <= r.x1);
+      // already found as a printed blank on this same line (lines can be only ~14pt apart)
+      const taken = blanks.some((b) => b.page === pi && b.kind !== 'field' && Math.abs(b.y - r.y) < Math.min(8, (b.size || 10) * 0.7) && b.x >= r.x0 - 25 && b.x <= r.x1);
       if (taken || inWidget(pi, r.x0, r.y, r.x1, r.y + 10)) continue;
       // already written on? (scans read box bars as "I", "l", "|": not writing)
       const filled = P.items.some((it) => { const cx = it.x + it.w / 2; return cx > r.x0 + 3 && cx < r.x1 - 3 && it.y >= r.y - 2 && it.y - r.y < 12 && /[\p{L}\p{N}]/u.test(it.str) && !/^[|Il1L_\[\]()!:;.,\s]+$/.test(it.str); });
       if (filled) continue;
       let key = null, label = '', size = 10, place = 'on';
-      const l = P.lines.find((l) => { const y = lineYAt(l, r.x0); return y >= r.y - 1 && y - r.y < 14 && l.x0 < r.x0; });
+      // the text line this blank sits on: the closest one, not just the first that is near
+      const l = P.lines.filter((l) => { const y = lineYAt(l, r.x0); return y >= r.y - 1 && y - r.y < 14 && l.x0 < r.x0; })
+        .sort((a, b) => Math.abs(lineYAt(a, r.x0) - r.y - 2) - Math.abs(lineYAt(b, r.x0) - r.y - 2))[0];
+      let tailText = '';
       if (l) {
         let k = 0;
         while (k < l.chars.length && l.chars[k].x1 <= r.x0 + 2) k++;
         label = l.str.slice(0, k);
         const gap = k ? r.x0 - l.chars[k - 1].x1 : 1e9;
         const tail = label.split(/\t|_{3,}|\.{4,}/).pop();
-        if (gap < 150 && tail.trim()) { key = classify(tail, env.compiled, { ...opts, window: label }); size = l.size; }
+        if (gap < 150 && tail.trim()) { tailText = tail; key = classify(tail, env.compiled, { ...opts, window: label }); size = l.size; }
+      }
+      // dots at the start of a line: the label ends the line above ("domiciliat în localitatea" / "........")
+      if (!key && !tailText.replace(/[\s.,;:_-]/g, '')) {
+        const above = P.lines.filter((q) => { const y = lineYAt(q, r.x1); return y - r.y > 4 && y - r.y < 30; })
+          .sort((a, b) => lineYAt(a, r.x1) - lineYAt(b, r.x1))[0];
+        // only if that line really ends with the label, at the right margin (not "seria ....," mid-line)
+        const margin = Math.max(...P.lines.map((q) => (q.chars[q.chars.length - 1] || { x1: 0 }).x1));
+        const lastX = above && (above.chars.filter((c, i) => /\S/.test(above.str[i])).pop() || { x1: 0 }).x1;
+        if (above && lastX >= margin - 45) {
+          const t = above.str.split(/\t|_{3,}|\.{4,}|\u2026/).pop().replace(/[\s,;]+$/, '');
+          const k2 = t && classify(t, env.compiled, { ...opts, window: above.str, maxTail: 3 });
+          if (k2) { key = k2; label = t; size = above.size; }
+        }
       }
       if (!key) {
         const below = P.lines.find((l) => { const y = lineYAt(l, (r.x0 + r.x1) / 2); return r.y - y > 0 && r.y - y < 16 && l.x0 >= r.x0 - 10 && l.x0 < r.x1; });
         const m = below && /^\s*\(([^)]{2,50})\)/.exec(below.str);
         if (m) { key = classify(m[1], env.compiled, { ...opts, maxTail: 30 }); label = '(' + m[1] + ')'; size = below.size; place = 'over'; }
       }
-      if (!key) continue;
+      // a long line of dots at the start of a line with no readable label: offer it to choose
+      const leftMargin = Math.min(...P.lines.map((q) => q.x0));
+      const lineAbove = P.lines.some((q) => { const y = lineYAt(q, r.x0); return y - r.y > 4 && y - r.y < 25; });
+      const offerAnyway = P.ocr && lineAbove && !key && !tailText.replace(/[\s.,;:_-]/g, '') && r.x1 - r.x0 > 60 && !r.cells && Math.abs(r.x0 - leftMargin) < 15;
+      if (!key && !offerAnyway) continue;
       size = clamp(size, 7, 12);
-      const it = { kind: 'text', page: pi, key, x: r.x0 + 2, y: r.y + 2, size, maxW: r.cells ? 0 : r.x1 - r.x0 - 4, cover: null,
+      const it = { kind: 'text', page: pi, key, x: r.x0 + 2, y: r.y + 2 + (P.ocr ? 0.12 * size : 0), size, maxW: r.cells ? 0 : r.x1 - r.x0 - 4, cover: null, dateBoxes: !!r.date,
         boxes: r.cells ? r.cells.map(([a, z]) => ({ x0: a, x1: z })) : undefined,
         before: label.replace(/\s+/g, ' ').trim().slice(-48), after: place === 'over' ? '(line)' : '', where: 'page ' + (pi + 1), canImage: true };
       if (key === 'signature') { it.kind = 'image'; it.h = clamp(size * 2.8, 22, 44); it.w = Math.min(it.h * sig.w / sig.h, r.x1 - r.x0); it.h = it.w * sig.h / sig.w; it.y = r.y - 2; }
