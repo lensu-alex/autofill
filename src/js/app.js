@@ -11,7 +11,7 @@ const OFFICE = {
 };
 const IMAGES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', tif: 'image/tiff', tiff: 'image/tiff', avif: 'image/avif' };
 const APPLE = { pages: 'Pages', numbers: 'Numbers', key: 'Keynote' };
-const OLD_FORMATS = { doc: 'Word', xls: 'Excel', ppt: 'PowerPoint' };
+const OLD_FORMATS = { xls: 'Excel', ppt: 'PowerPoint' };
 
 const App = {
   vault: null, k: null, pendingVaultText: null, dirty: false,
@@ -242,12 +242,13 @@ const App = {
   bindFill() {
     const drop = $('#drop');
     $('#pick-doc').onclick = () => $('#doc-file').click();
-    $('#doc-file').onchange = (e) => { if (e.target.files[0]) this.openDoc(e.target.files[0]); e.target.value = ''; };
+    const take = (list) => { const fs = [...list]; if (fs.length > 1) this.fillMany(fs); else if (fs[0]) this.openDoc(fs[0]); };
+    $('#doc-file').onchange = (e) => { take(e.target.files); e.target.value = ''; };
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
     drop.ondragleave = () => drop.classList.remove('over');
-    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) this.openDoc(e.dataTransfer.files[0]); };
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); take(e.dataTransfer.files); };
     document.ondragover = (e) => e.preventDefault();
-    document.ondrop = (e) => { e.preventDefault(); if (this.vault && e.dataTransfer.files[0]) { this.showTab('fill'); this.openDoc(e.dataTransfer.files[0]); } };
+    document.ondrop = (e) => { e.preventDefault(); if (this.vault && e.dataTransfer.files.length) { this.showTab('fill'); this.closeDoc(); take(e.dataTransfer.files); } };
     $('#close-doc').onclick = () => this.closeDoc();
     $('#save-doc').onclick = () => this.saveDoc();
     $('#save-png').onclick = () => this.saveDoc(true);
@@ -260,45 +261,55 @@ const App = {
     $('#editor').textContent = ''; $('#blank-list').textContent = '';
   },
 
+  // Reads a file and finds its blanks (no screen updates). Returns { sess, notice }.
+  async loadSession(file, env) {
+    let ext = fileExt(file.name);
+    let bytes = new Uint8Array(await file.arrayBuffer());
+    let sess, notice = '';
+    if (ext === 'doc' || ext === 'dot') {
+      bytes = await docToDocx(bytes);
+      ext = 'docx';
+      notice = 'Old Word (.doc) file: it was converted to .docx to fill it, so fonts and layout are simplified. For the original look, open it in Word or Pages, save as .docx and drop that instead.';
+    }
+    if (OLD_FORMATS[ext]) throw new Error(`Old ${OLD_FORMATS[ext]} format. Open it and "Save As" the new format (.${ext}x), then drop that here.`);
+    if (ext === 'pdf' || IMAGES[ext] || APPLE[ext]) {
+      let pdfBytes = bytes, px = null;
+      if (APPLE[ext]) {
+        const pv = await pagesPreview(bytes);
+        const r = await imageToPdf(pv.bytes, pv.type);
+        pdfBytes = r.bytes; px = r.px;
+        notice = `${APPLE[ext]} files can only be read from their preview picture (first page). For a sharper result: in ${APPLE[ext]} choose File → Export To → ${ext === 'numbers' ? 'Excel' : ext === 'key' ? 'PowerPoint' : 'Word'} (or PDF) and drop that file here.`;
+      } else if (IMAGES[ext]) {
+        const r = await imageToPdf(bytes, IMAGES[ext]);
+        pdfBytes = r.bytes; px = r.px;
+      }
+      const res = await processPdf(pdfBytes, env);
+      sess = { type: 'pdf', name: file.name, bytes: pdfBytes, px, ...res };
+      if (res.scanned) notice = (notice ? notice + ' ' : '') + 'No text could be read on this picture. Click on the page where each thing should go.';
+      else if (res.xfa) notice = (notice ? notice + ' ' : '') + 'This is an Adobe "XFA" form, which only Adobe Reader can fill properly. Your info will be written on top of the page instead; check the result.';
+      else if (res.ocrUsed) notice = (notice ? notice + ' ' : '') + 'This is a scan/photo: its text was read automatically, so check that everything sits in the right place (drag to adjust, click the page to add more).';
+    } else if (OFFICE[ext]) {
+      const res = await OFFICE[ext](bytes, env, ext);
+      sess = { type: 'office', name: baseName(file.name) + '.' + ext, ext, proc: OFFICE[ext], bytes, blanks: res.blanks };
+    } else {
+      throw new Error(`Can't fill .${ext || '?'} files yet. Supported: PDF, Word (.docx/.doc), Pages, OpenDocument, Excel, PowerPoint, pictures, HTML and text.`);
+    }
+    refineKeys(sess.blanks);
+    if (this.settings().smart !== false) {
+      const n = await Smart.pass(sess.blanks, this.vault, env.progress);
+      if (n && sess.type === 'pdf') sess.blanks.forEach((b) => { if (b.smart && b.key === 'signature') setBlankKind(b, 'signature', this.vault); });
+    }
+    sess.blanks.forEach((b, i) => { b.id = i; });
+    return { sess, notice };
+  },
+
+  env() { return { compiled: this.compiled, vault: this.vault, values: this.values, progress: (m) => { $('#drop-status').textContent = m; } }; },
+
   async openDoc(file) {
-    const ext = fileExt(file.name);
-    if (OLD_FORMATS[ext]) return toast(`Old ${OLD_FORMATS[ext]} format. Open it and "Save As" the new format (.${ext}x), then drop that here.`, 'bad', 7000);
-    const env = { compiled: this.compiled, vault: this.vault, values: this.values, progress: (m) => { $('#drop-status').textContent = m; } };
-    const bytes = new Uint8Array(await file.arrayBuffer());
     $('#drop').classList.add('busy');
     $('#work').removeAttribute('data-ready');
     try {
-      let sess;
-      let notice = '';
-      if (ext === 'pdf' || IMAGES[ext] || APPLE[ext]) {
-        let pdfBytes = bytes, px = null;
-        if (APPLE[ext]) {
-          const pv = await pagesPreview(bytes);
-          const r = await imageToPdf(pv.bytes, pv.type);
-          pdfBytes = r.bytes; px = r.px;
-          notice = `${APPLE[ext]} files can only be read from their preview picture (first page). For a sharper result: in ${APPLE[ext]} choose File → Export To → ${ext === 'numbers' ? 'Excel' : ext === 'key' ? 'PowerPoint' : 'Word'} (or PDF) and drop that file here.`;
-        } else if (IMAGES[ext]) {
-          const r = await imageToPdf(bytes, IMAGES[ext]);
-          pdfBytes = r.bytes; px = r.px;
-        }
-        const res = await processPdf(pdfBytes, env);
-        sess = { type: 'pdf', name: file.name, bytes: pdfBytes, px, ...res };
-        // multi-page TIFFs etc. keep their own size for PNG export (first page only)
-        if (res.scanned) notice = (notice ? notice + ' ' : '') + 'No text could be read on this picture. Click on the page where each thing should go.';
-        else if (res.xfa) notice = (notice ? notice + ' ' : '') + 'This is an Adobe "XFA" form, which only Adobe Reader can fill properly. Your info will be written on top of the page instead; check the result.';
-        else if (res.ocrUsed) notice = (notice ? notice + ' ' : '') + 'This is a scan/photo: its text was read automatically, so check that everything sits in the right place (drag to adjust, click the page to add more).';
-      } else if (OFFICE[ext]) {
-        const res = await OFFICE[ext](bytes, env, ext);
-        sess = { type: 'office', name: file.name, ext, proc: OFFICE[ext], bytes, blanks: res.blanks };
-      } else {
-        throw new Error(`Can't fill .${ext || '?'} files yet. Supported: PDF, Word, Pages, OpenDocument, Excel, PowerPoint, pictures, HTML and text.`);
-      }
-      refineKeys(sess.blanks);
-      if (this.settings().smart !== false) {
-        const n = await Smart.pass(sess.blanks, this.vault, env.progress);
-        if (n && sess.type === 'pdf') sess.blanks.forEach((b) => { if (b.smart && b.key === 'signature') setBlankKind(b, 'signature', this.vault); });
-      }
-      sess.blanks.forEach((b, i) => { b.id = i; });
+      const { sess, notice } = await this.loadSession(file, this.env());
       this.sess = sess;
       $('#drop').hidden = true; $('#work').hidden = false;
       $('#doc-name').textContent = file.name;
@@ -318,6 +329,32 @@ const App = {
     } catch (err) {
       console.error(err);
       toast(err.message || String(err), 'bad', 8000);
+    } finally { $('#drop').classList.remove('busy'); $('#drop-status').textContent = ''; }
+  },
+
+  // Several files at once: fill each with the automatic choices, download one zip
+  async fillMany(files) {
+    $('#drop').classList.add('busy');
+    const zip = new JSZip();
+    const report = [];
+    try {
+      for (const [i, f] of files.entries()) {
+        $('#drop-status').textContent = `Filling ${i + 1} of ${files.length}: ${f.name}`;
+        try {
+          const { sess } = await this.loadSession(f, this.env());
+          const { blob, name } = await this.buildBlob(sess, false, { cover: true });
+          let n = name, k = 2;
+          while (zip.file(n)) n = baseName(name) + ` (${k++}).` + fileExt(name);
+          zip.file(n, blob);
+          const shown = sess.blanks.filter((b) => !(b.optional && !b.key));
+          report.push(`✓ ${f.name}: ${shown.filter((b) => this.valueOf(b)).length} of ${shown.length} blanks filled`);
+        } catch (e) { report.push(`✗ ${f.name}: ${e.message || e}`); }
+      }
+      zip.file('report.txt', report.join('\n') + '\n\nCheck each file before using it: guesses can be wrong.\n');
+      download(await zip.generateAsync({ type: 'blob' }), 'filled-documents.zip');
+      $('#batch-report').hidden = false;
+      $('#batch-report').textContent = report.join('\n');
+      toast('Saved filled-documents.zip to your Downloads', 'good');
     } finally { $('#drop').classList.remove('busy'); $('#drop-status').textContent = ''; }
   },
 
@@ -443,28 +480,29 @@ const App = {
       (missing ? ` · ${missing} missing from your info` : '') + (unknown ? ` · ${unknown} to choose` : '');
   },
 
+  async buildBlob(s, asPng, opts = {}) {
+    const sigBytes = this.vault.signature ? dataUrlToBytes(this.vault.signature) : null;
+    if (s.type === 'pdf') {
+      const out = await buildPdf(s, (b) => this.valueOf(b), { ink: this.settings().ink, cover: opts.cover ?? this.cover() });
+      if (asPng) return { blob: await pdfPageToPng(out, s.px), name: baseName(s.name) + '-filled.png' };
+      return { blob: new Blob([out], { type: 'application/pdf' }), name: baseName(s.name) + '-filled.pdf' };
+    }
+    const fresh = await s.proc(s.bytes, { compiled: this.compiled, vault: this.vault, values: this.values }, s.ext);
+    if (fresh.blanks.length !== s.blanks.length) throw new Error('The document changed while reading it — please drop it again');
+    for (let i = s.blanks.length - 1; i >= 0; i--) {
+      const val = this.valueOf(s.blanks[i]);
+      if (val) fresh.blanks[i].apply(val);
+    }
+    return { blob: await fresh.finish(sigBytes), name: baseName(s.name) + '-filled.' + s.ext };
+  },
+
   async saveDoc(asPng) {
     const s = this.sess;
     if (!s) return;
     const btn = asPng ? $('#save-png') : $('#save-doc');
     btn.disabled = true;
     try {
-      const sigBytes = this.vault.signature ? dataUrlToBytes(this.vault.signature) : null;
-      let blob, name;
-      if (s.type === 'pdf') {
-        const out = await buildPdf(s, (b) => this.valueOf(b), { ink: this.settings().ink, cover: this.cover() });
-        if (asPng) { blob = await pdfPageToPng(out, s.px); name = baseName(s.name) + '-filled.png'; }
-        else { blob = new Blob([out], { type: 'application/pdf' }); name = baseName(s.name) + '-filled.pdf'; }
-      } else {
-        const fresh = await s.proc(s.bytes, { compiled: this.compiled, vault: this.vault }, s.ext);
-        if (fresh.blanks.length !== s.blanks.length) throw new Error('The document changed while reading it — please drop it again');
-        for (let i = s.blanks.length - 1; i >= 0; i--) {
-          const val = this.valueOf(s.blanks[i]);
-          if (val) fresh.blanks[i].apply(val);
-        }
-        blob = await fresh.finish(sigBytes);
-        name = baseName(s.name) + '-filled.' + s.ext;
-      }
+      const { blob, name } = await this.buildBlob(s, asPng);
       download(blob, name);
       toast('Saved ' + name + ' to your Downloads', 'good');
     } catch (err) {

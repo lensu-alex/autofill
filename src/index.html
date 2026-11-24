@@ -51,7 +51,9 @@
         <div class="big">Drop a document here</div>
         <div class="muted">PDF · Word · Pages · OpenDocument · Excel · PowerPoint · photos/scans · HTML · text</div>
         <button class="primary" id="pick-doc">Choose a file…</button>
-        <input type="file" id="doc-file" hidden>
+        <input type="file" id="doc-file" multiple hidden>
+        <div class="muted small">Tip: choose or drop several files at once to fill them all and get one zip.</div>
+        <pre id="batch-report" class="small" hidden></pre>
         <div id="drop-status" class="muted small"></div>
       </div>
       <div id="work" hidden>

@@ -36,7 +36,7 @@ const FIELD_DEFS = [
   { key: 'entrance', group: 'address', label: 'Entrance · Scara', syn: ['scara', 'sc', 'entrance'] },
   { key: 'floor', group: 'address', label: 'Floor · Etaj', syn: ['etaj', 'etajul', 'et', 'floor'] },
   { key: 'apartment', group: 'address', label: 'Apartment · Ap.', syn: ['apartament', 'apartamentul', 'ap', 'apt', 'apartment', 'flat'] },
-  { key: 'city', group: 'address', label: 'City · Localitatea', syn: ['localitatea', 'localitate', 'orasul', 'oras', 'municipiul', 'comuna', 'satul', 'city', 'town', 'locality', 'town city'] },
+  { key: 'city', group: 'address', label: 'City · Localitatea', syn: ['localitatea', 'localitate', 'loc', 'orasul', 'oras', 'municipiul', 'comuna', 'satul', 'city', 'town', 'locality', 'town city'] },
   { key: 'sector', group: 'address', label: 'Sector', syn: ['sectorul', 'sector'] },
   { key: 'county', group: 'address', label: 'County · Județ', syn: ['judetul', 'judet', 'jud', 'county', 'state', 'province', 'region'] },
   { key: 'postal_code', group: 'address', label: 'Postal code · Cod poștal', syn: ['cod postal', 'codul postal', 'postal code', 'zip code', 'zip', 'postcode'] },
