@@ -84,6 +84,9 @@
         <span id="dirty" class="badge" hidden>Not saved</span>
         <button class="primary" id="save-vault">Save</button>
       </div>
+      <div class="people" id="people-bar"></div>
+      <div class="card" id="person-box" hidden></div>
+      <div id="me-only">
       <div class="card">
         <h3>Signature</h3>
         <div class="sigwrap">
@@ -97,8 +100,9 @@
         <div class="sigcur"><span class="muted">Saved signature:</span> <span id="sig-none" class="muted">none yet</span><img id="sig-img" alt="your signature" hidden><button id="sig-remove" class="mini danger" hidden>Remove</button></div>
         <p class="muted small">Tip: sign in black pen on white paper, take a photo, upload it. The paper is removed automatically.</p>
       </div>
+      </div>
       <div id="info-form"></div>
-      <div class="card">
+      <div class="card" id="custom-card">
         <h3>My extra fields</h3>
         <p class="muted small">Anything else forms ask for. "Also called" lists other words a form may use for it, separated by commas.</p>
         <div id="custom-list"></div>

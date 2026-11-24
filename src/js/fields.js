@@ -188,9 +188,11 @@ function fieldLabel(key, vault) {
 }
 
 // key -> text value, including derived ones
-function computeValues(vault) {
-  const v = { ...(vault?.values || {}) };
-  for (const c of vault?.custom || []) if (c.value) v[c.key] = c.value;
+// personId: another person stored in the vault (child, spouse…); default = you
+function computeValues(vault, personId) {
+  const person = personId && personId !== 'me' ? (vault?.people || []).find((p) => p.id === personId) : null;
+  const v = { ...((person ? person.values : vault?.values) || {}) };
+  if (!person) for (const c of vault?.custom || []) if (c.value) v[c.key] = c.value;
   for (const k of Object.keys(v)) if (typeof v[k] === 'string') v[k] = v[k].trim();
   const fmt = vault?.settings?.dateFormat;
   // A Romanian CNP holds sex and birth date: S YY MM DD …
@@ -231,7 +233,7 @@ function computeValues(vault) {
   }
   v.today = formatDate(new Date(), vault?.settings?.dateFormat);
   if (v.birth_place || v.birth_date) v.birth_place_date = [v.birth_place, v.birth_date].filter(Boolean).join(', ');
-  if (vault?.signature) v.signature = '✍︎ (your signature)';
+  if (vault?.signature && !person) v.signature = '✍︎ (your signature)';
   for (const k of Object.keys(v)) if (!v[k]) delete v[k];
   return v;
 }
@@ -273,3 +275,5 @@ function learnPhrase(label) {
   const w = t.split(' ').filter((x) => x && !/^\d+$/.test(x)).slice(-4);
   return w.join(' ');
 }
+
+const RELATIONS = [['child', 'Child · Copil'], ['spouse', 'Spouse · Soț/soție'], ['parent', 'Parent · Părinte'], ['other', 'Other person']];

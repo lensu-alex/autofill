@@ -1,0 +1,25 @@
+// A child saved in the vault fills the "DATE PRIVIND COPIII MINORI" section of a real form.
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('..', import.meta.url));
+const b = await chromium.launch();
+const page = await (await b.newContext({ acceptDownloads: true, viewport: { width: 1400, height: 1200 } })).newPage();
+const errors = [];
+page.on('pageerror', (e) => errors.push(e.message));
+page.on('dialog', (d) => d.accept());
+await page.goto('file://' + root + 'autofill.html');
+await page.fill('#new-pw', 'test-password-1'); await page.fill('#new-pw2', 'test-password-1'); await page.press('#new-pw2', 'Enter');
+await page.waitForSelector('#tab-info:not([hidden])');
+await page.fill('[data-key="first_name"]', 'Ionuț'); await page.fill('[data-key="last_name"]', 'Popescu');
+await page.click('#people-bar button:has-text("+ Add a person")');
+await page.fill('#person-box input', 'Maria');
+await page.fill('[data-key="first_name"]', 'Maria'); await page.fill('[data-key="last_name"]', 'Popescu');
+await page.fill('[data-key="birth_date"]', '05.06.2018'); await page.fill('[data-key="birth_place"]', 'Iași');
+await page.click('#save-vault');
+await page.click('.tabs button[data-tab="fill"]');
+const file = process.argv[2] || root + 'tests/fixtures/children.txt';
+await page.setInputFiles('#doc-file', file);
+await page.waitForSelector('#work[data-ready]');
+console.log((await page.$$eval('#blank-list .row', (rs) => rs.map((r) => [r.querySelector('.ctx').innerText.replace(/\s+/g, ' ').slice(-40), r.querySelector('.fsel').value, r.querySelector('.psel')?.value || '-', r.querySelector('.val').innerText].join(' | ')))).join('\n'));
+console.log('errors:', errors.length ? errors : 'none');
+await b.close();

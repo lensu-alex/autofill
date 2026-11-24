@@ -110,3 +110,7 @@ button.danger { color: var(--bad); }
 }
 
 .learned { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); }
+
+.people { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.people button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.psel { margin-top: 6px; font-size: 12px; padding: 3px 6px; }

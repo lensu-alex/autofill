@@ -126,7 +126,16 @@ const App = {
   },
 
   markDirty() { this.dirty = true; $('#dirty').hidden = false; this.refreshValues(); },
-  refreshValues() { this.compiled = compileFields(this.vault); this.values = computeValues(this.vault); },
+  refreshValues() { this.compiled = compileFields(this.vault); this.values = computeValues(this.vault); this.otherValues = {}; },
+  valuesFor(pid) {
+    if (!pid || pid === 'me') return this.values;
+    return this.otherValues[pid] || (this.otherValues[pid] = computeValues(this.vault, pid));
+  },
+  personName(pid) {
+    if (!pid || pid === 'me') return 'Me';
+    const p = this.vault.people.find((x) => x.id === pid);
+    return p ? (p.name || [p.values.first_name, p.values.last_name].filter(Boolean).join(' ') || RELATIONS.find((r) => r[0] === p.relation)?.[1] || 'Person') : 'Me';
+  },
 
   buildLearned() {
     const box = $('#learned-list');
@@ -151,14 +160,45 @@ const App = {
 
   buildInfo() {
     $$('.tabs button').forEach((b) => { b.onclick = () => this.showTab(b.dataset.tab); });
+    this.editing = this.editing && this.vault.people.some((p) => p.id === this.editing) ? this.editing : 'me';
+    const person = this.editing === 'me' ? null : this.vault.people.find((p) => p.id === this.editing);
+    const target = person ? person.values : this.vault.values;
+    // whose information is shown: you, or someone you fill forms for (child, spouse…)
+    const bar = $('#people-bar');
+    bar.textContent = '';
+    const pick = (id) => { this.editing = id; this.buildInfo(); };
+    bar.append(h('button', { class: this.editing === 'me' ? 'on' : '', onclick: () => pick('me') }, 'Me'));
+    for (const p of this.vault.people) bar.append(h('button', { class: this.editing === p.id ? 'on' : '', onclick: () => pick(p.id) }, this.personName(p.id)));
+    bar.append(h('button', { onclick: () => {
+      const p = { id: 'p' + Math.random().toString(36).slice(2, 8), relation: 'child', name: '', values: {} };
+      this.vault.people.push(p); this.markDirty(); pick(p.id);
+    } }, '+ Add a person'));
+    const pbox = $('#person-box');
+    pbox.textContent = '';
+    pbox.hidden = !person;
+    if (person) {
+      const rel = h('select', {}, ...RELATIONS.map(([v, l]) => h('option', { value: v, text: l })));
+      rel.value = person.relation;
+      rel.onchange = () => { person.relation = rel.value; this.markDirty(); };
+      const nm = h('input', { value: person.name || '', placeholder: 'Short name, e.g. Maria' });
+      nm.oninput = () => { person.name = nm.value; this.markDirty(); };
+      nm.onchange = () => { const btn = $('#people-bar button.on'); if (btn) btn.textContent = this.personName(person.id); };
+      pbox.append(h('div', { class: 'grid' },
+        h('label', { class: 'fld' }, h('span', { text: 'Who is this?' }), rel),
+        h('label', { class: 'fld' }, h('span', { text: 'Name shown in the app' }), nm)),
+        h('p', { class: 'muted small', text: 'Used for form sections about them (e.g. "DATE PRIVIND COPIII MINORI"), or pick them for any blank.' }),
+        h('button', { class: 'mini danger', onclick: () => { if (!confirm('Remove this person and their information?')) return; this.vault.people = this.vault.people.filter((x) => x !== person); this.markDirty(); pick('me'); } }, 'Remove this person'));
+    }
+    $('#me-only').hidden = !!person;
+    $('#custom-card').hidden = !!person;
     const form = $('#info-form');
     form.textContent = '';
     for (const [g, gl] of FIELD_GROUPS) {
       if (g === 'custom') continue;
       const grid = h('div', { class: 'grid' });
       for (const f of FIELD_DEFS.filter((x) => x.group === g)) {
-        const inp = h('input', { value: this.vault.values[f.key] || '', placeholder: f.hint || '', 'data-key': f.key, autocomplete: 'off', spellcheck: false });
-        inp.addEventListener('input', () => { this.vault.values[f.key] = inp.value; this.markDirty(); });
+        const inp = h('input', { value: target[f.key] || '', placeholder: f.hint || '', 'data-key': f.key, autocomplete: 'off', spellcheck: false });
+        inp.addEventListener('input', () => { target[f.key] = inp.value; this.markDirty(); });
         grid.append(h('label', { class: 'fld' }, h('span', { text: f.label }), inp));
       }
       form.append(h('div', { class: 'card' }, h('h3', { text: gl }), grid));
@@ -340,6 +380,12 @@ const App = {
       throw new Error(`Can't fill .${ext || '?'} files yet. Supported: PDF, Word (.docx/.doc), Pages, OpenDocument, Excel, PowerPoint, pictures, HTML and text.`);
     }
     refineKeys(sess.blanks);
+    // sections about your child/spouse/parent: use that person's info if you saved it
+    for (const b of sess.blanks) {
+      if (!b.otherPerson || !b.otherKey) continue;
+      const p = this.vault.people.find((x) => x.relation === b.otherRel) || (b.otherRel === 'other' ? null : null);
+      if (p) { b.person = p.id; b.key = b.otherKey; }
+    }
     if (this.settings().smart !== false) {
       const n = await Smart.pass(sess.blanks, this.vault, env.progress);
       if (n && sess.type === 'pdf') sess.blanks.forEach((b) => { if (b.smart && b.key === 'signature') setBlankKind(b, 'signature', this.vault); });
@@ -409,11 +455,11 @@ const App = {
     if (b.key === '__tick') return { check: true, text: '✓' };
     if (b.key === '__text') return b.text ? (b.kind === 'field' ? fieldValue(b, b.text) : { text: b.text }) : null;
     if (b.key === 'signature') {
-      if (!this.vault.signature) return null;
+      if (!this.vault.signature || (b.person && b.person !== 'me')) return null;
       const sz = this.vault.sigSize || { w: 300, h: 100 };
       return { image: { dataUrl: this.vault.signature, bytes: dataUrlToBytes(this.vault.signature), w: sz.w, h: sz.h } };
     }
-    let v = this.values[b.key];
+    let v = this.valuesFor(b.person)[b.key];
     // "str. ____" + "Str. Florilor" would give "str. Str. Florilor"
     if (v && b.key === 'street' && /\b(str|strada|bd|b-dul|bulevardul|sos|soseaua|calea|aleea|street)\.?\s*:?\s*$/i.test(b.before || '')) {
       v = v.replace(/^(str(ada)?|bd|b-dul|bulevardul|sos(eaua)?|calea|aleea)\.?\s+/i, '');
@@ -448,6 +494,14 @@ const App = {
       }
       onchange(s.value || null, text);
     };
+    return s;
+  },
+
+  personSelect(b) {
+    const s = h('select', { class: 'psel', title: 'Whose information' }, h('option', { value: 'me', text: 'for: Me' }),
+      ...this.vault.people.map((p) => h('option', { value: p.id, text: 'for: ' + this.personName(p.id) })));
+    s.value = b.person || 'me';
+    s.onchange = () => { b.person = s.value === 'me' ? null : s.value; if (this.editor) this.editor.draw(b); this.renderList(); };
     return s;
   },
 
@@ -515,9 +569,11 @@ const App = {
           b.where ? h('span', { class: 'where', text: b.where }) : null,
           h('span', { text: b.before ? '…' + b.before : '' }), h('mark', { text: ' ▢ ' }), h('span', { text: b.after ? b.after + '…' : '' })),
         h('div', { class: 'pick' }, this.fieldSelect(b, (k, t) => this.setKey(b, k, t)), h('div', { class: 'val' }, preview)),
+        this.vault.people.length && b.key && b.key[0] !== '_' && b.key !== 'signature' ? this.personSelect(b) : null,
         tooLong ? h('div', { class: 'warn', text: '⚠ Longer than the blank: check it on the page, drag it or make it smaller' }) : null,
         b.guess && val ? h('div', { class: 'warn', text: '≈ Best guess from similar wording: please check' }) : null,
-        b.otherPerson && !b.key ? h('div', { class: 'warn', text: 'In a section about someone else (' + b.section.slice(0, 40) + '): left empty' }) : null);
+        b.otherPerson && !b.key ? h('div', { class: 'warn', text: 'In a section about someone else (' + b.section.slice(0, 40) + '): left empty. Add them under My information → + Add a person.' }) : null,
+        b.otherPerson && b.person ? h('div', { class: 'warn', text: 'Section about ' + this.personName(b.person) + ': filled with their info' }) : null);
       if (this.editor) row.addEventListener('click', (e) => { if (e.target.tagName !== 'SELECT' && e.target.tagName !== 'OPTION') this.editor.select(b, true); });
       list.append(row);
     }

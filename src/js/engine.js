@@ -205,7 +205,12 @@ function applySections(blanks) {
   for (const b of blanks) {
     if (!b.section || !b.key || b.key === 'today' || b.key === 'signature') continue;
     const n = norm(b.section);
-    if (OTHER_SECTION.test(n) && !SELF_SECTION.test(n)) { b.key = null; b.guess = false; b.otherPerson = true; }
+    if (OTHER_SECTION.test(n) && !SELF_SECTION.test(n)) {
+      b.otherKey = b.key; b.key = null; b.guess = false; b.otherPerson = true;
+      b.otherRel = /\b(copil|copii|copiii|copiilor|copilului|minor|minori|minorului|child|children)\b/.test(n) ? 'child'
+        : /\b(sot|sotie|sotului|sotiei|spouse)\b/.test(n) ? 'spouse'
+        : /\b(parinti|parintilor|parent|parents)\b/.test(n) ? 'parent' : 'other';
+    }
   }
 }
 

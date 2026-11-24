@@ -35,6 +35,8 @@ Fills any document with your personal information and signature, from an encrypt
 
 Guesses are marked "≈ please check" in the list.
 
+**Other people**: under *My information → + Add a person* you can keep a child's, spouse's or parent's details. Sections about them ("DATE PRIVIND COPIII MINORI") fill with their info, and any blank can be switched to another person ("for: …").
+
 Also derived: full name (choose the order), full address from its parts, age, birth date and sex from the CNP, today's date (choose the format).
 
 ## Security

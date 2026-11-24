@@ -7,7 +7,7 @@ const LS_KEY = 'autofill.vault.v1';
 const DEFAULT_SETTINGS = { dateFormat: 'dd.mm.yyyy', autoLock: 10, ink: 'black', remember: true, smart: true, nameOrder: 'first-last' };
 
 function newVaultData() {
-  return { version: 1, values: {}, custom: [], signature: null, sigSize: null, settings: { ...DEFAULT_SETTINGS } };
+  return { version: 1, values: {}, custom: [], people: [], signature: null, sigSize: null, settings: { ...DEFAULT_SETTINGS } };
 }
 
 async function deriveKey(password, salt, iter) {
@@ -47,6 +47,7 @@ async function openVault(text, password) {
   data.settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}) };
   data.values = data.values || {};
   data.custom = data.custom || [];
+  data.people = data.people || [];
   return { data, k: { key, salt, iter: box.kdf.iter } };
 }
 
