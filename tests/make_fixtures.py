@@ -145,3 +145,16 @@ tbl = s.shapes.add_table(3, 2, Inches(1), Inches(2), Inches(6), Inches(1.5)).tab
 for i, lab in enumerate(['Nume și prenume', 'E-mail', 'Telefon']): tbl.cell(i, 0).text = lab
 pr.save(os.path.join(D, 'table.pptx'))
 print('pptx table written')
+
+# --- English job application (UK/US wording), with a table
+d = Document()
+d.add_heading('Job Application Form', 1)
+t = d.add_table(rows=12, cols=2); t.style = 'Table Grid'
+for i, lab in enumerate(['Title', 'First Name(s)', 'Surname', 'Date of Birth (DD/MM/YYYY)', 'Address Line 1', 'Town/City', 'Postcode',
+                         'Telephone Number', 'Email Address', 'Nationality', 'National Insurance Number', 'Current Employer']):
+    t.cell(i, 0).text = lab
+d.add_paragraph('Declaration: I confirm that the information given is true.')
+d.add_paragraph('Signed: ______________________     Date: ____________')
+d.add_paragraph('Print name: ______________________')
+d.save(os.path.join(D, 'english-application.docx'))
+print('english written')

@@ -43,7 +43,7 @@ const FIELD_DEFS = [
   { key: 'country', group: 'address', label: 'Country · Țara', syn: ['tara', 'country'] },
   { key: 'address', group: 'address', label: 'Full address · Domiciliul', hint: 'empty = built from the parts above', syn: ['domiciliul', 'domiciliat in', 'domiciliata in', 'domiciliat', 'domiciliata', 'cu domiciliul in', 'cu domiciliul', 'domiciliu', 'adresa', 'adresa de domiciliu', 'adresa completa', 'resedinta', 'address', 'home address', 'residing at', 'residing in', 'residence', 'living at'] },
 
-  { key: 'phone', group: 'contact', label: 'Phone · Telefon', syn: ['telefon', 'tel', 'nr telefon', 'numar de telefon', 'numar telefon', 'telefon mobil', 'mobil', 'phone', 'phone number', 'telephone', 'mobile', 'mobile number', 'cell'] },
+  { key: 'phone', group: 'contact', label: 'Phone · Telefon', syn: ['telefon', 'tel', 'nr telefon', 'numar de telefon', 'numar telefon', 'telefon mobil', 'mobil', 'phone', 'phone number', 'telephone', 'telephone number', 'contact number', 'mobile', 'mobile number', 'cell'] },
   { key: 'email', group: 'contact', label: 'Email', syn: ['e mail', 'email', 'adresa de e mail', 'adresa de email', 'adresa email', 'mail', 'email address', 'e mail address'] },
 
   { key: 'occupation', group: 'work', label: 'Occupation · Ocupația', syn: ['ocupatia', 'ocupatie', 'profesia', 'profesie', 'functia', 'functie', 'occupation', 'profession', 'job title', 'position'] },
@@ -122,7 +122,7 @@ function classify(label, compiled, opts = {}) {
   const L = ' ' + norm(cleanLabel(label)) + ' ';
   if (!L.trim()) return null;
   const maxTail = opts.maxTail ?? 24;
-  let best = null;
+  let best = null, second = null;
   for (const f of compiled) {
     for (const s of f.synN) {
       if (!s) continue;
@@ -133,7 +133,8 @@ function classify(label, compiled, opts = {}) {
       // "Label:" lines: the field word must open the label ("Data:", not "poate fi dată:")
       if (opts.maxLead != null && L.slice(0, idx).trim().split(' ').filter(Boolean).length > opts.maxLead) continue;
       const score = s.length * 2 - tail * 6; // the word closest to the blank matters most
-      if (!best || score > best.score) best = { key: f.key, syn: s, score, tail };
+      if (!best || score > best.score) { if (best && best.key[0] !== '@') second = best; best = { key: f.key, syn: s, score, tail }; }
+      else if (f.key[0] !== '@' && (!second || score > second.score)) second = { key: f.key, syn: s, score, tail };
     }
   }
   classify.lastGuess = false;
@@ -174,7 +175,9 @@ function classify(label, compiled, opts = {}) {
     }
   }
   if (pick) return pick;
-  return best.key === '@date' ? 'today' : null;
+  if (best.key === '@date') return 'today';
+  // "Telephone Number": the vague word lost its meaning, so the next best word decides
+  return second && second.tail <= maxTail ? second.key : null;
 }
 
 function fieldLabel(key, vault) {
