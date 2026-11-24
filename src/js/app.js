@@ -597,7 +597,7 @@ const App = {
       let val = this.valueOf(b);
       const noPicture = val && val.image && b.canImage === false;
       if (noPicture) val = null;
-      if (val || (!val && b.fieldType === 'check' && b.key && this.values[b.key])) filled++; else if (!b.key) unknown++; else missing++;
+      if (val || noPicture || (!val && b.fieldType === 'check' && b.key && this.values[b.key])) filled++; else if (!b.key) unknown++; else missing++;
       const unticked = !val && b.fieldType === 'check' && b.key && this.values[b.key];
       const status = val || unticked || noPicture ? 'ok' : b.key ? 'missing' : 'unknown';
       const tooLong = val?.text && b.kind === 'text' && b.maxW > 10 && textWidth(val.text, b.size * 0.72) > b.maxW * 1.05;
