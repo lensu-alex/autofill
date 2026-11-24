@@ -30,6 +30,7 @@ const info = {
   email: 'ionut@example.ro', id_series: 'RT', id_number: '123456', id_issued_by: 'SPCLEP Sector 3',
   iban: 'RO49AAAA1B31007593840000', school: 'Universitatea din București',
   gender: 'M', county: 'Brașov', citizenship: 'română', id_issue_date: '10.05.2021', id_expiry_date: '03.02.2031',
+  faculty: 'Facultatea de Matematică și Informatică', study_program: 'Informatică', class_grade: 'II', bank: 'Banca Transilvania',
 };
 for (const [k, v] of Object.entries(info)) await page.fill(`[data-key="${k}"]`, v);
 // Draw a signature
@@ -55,7 +56,7 @@ for (const f of files) {
   const summary = await page.locator('#doc-summary').innerText();
   const rows = await page.$$eval('#blank-list .row', (rs) => rs.map((r) => {
     const s = r.querySelector('select');
-    return `${r.className.replace('row ', '').padEnd(8)} ${r.querySelector('.ctx').innerText.replace(/\s+/g, ' ').slice(0, 70).padEnd(70)} => ${s.value || '-'} | ${r.querySelector('.val').innerText}`;
+    return `${r.className.replace('row ', '').padEnd(8)} ${r.querySelector('.ctx').innerText.replace(/\s+/g, ' ').slice(0, 70).padEnd(70)} => ${s.value || '-'} | ${r.querySelector('.val-edit') ? r.querySelector('.val-edit').value : r.querySelector('.val').innerText}`;
   }));
   console.log(`\n### ${f}  (${summary})`);
   rows.forEach((r) => console.log('  ' + r));

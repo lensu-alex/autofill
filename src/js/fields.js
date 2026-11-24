@@ -48,8 +48,10 @@ const FIELD_DEFS = [
 
   { key: 'occupation', group: 'work', label: 'Occupation · Ocupația', syn: ['ocupatia', 'ocupatie', 'profesia', 'profesie', 'functia', 'functie', 'occupation', 'profession', 'job title', 'position'] },
   { key: 'employer', group: 'work', label: 'Employer · Loc de muncă', syn: ['angajator', 'angajatorul', 'loc de munca', 'locul de munca', 'employer', 'company', 'companie', 'firma'] },
-  { key: 'school', group: 'work', label: 'School / university · Școala', syn: ['unitatea de invatamant', 'scoala', 'liceul', 'colegiul', 'facultatea', 'universitatea', 'universitate', 'institutia de invatamant', 'school', 'university', 'college', 'faculty', 'institution'] },
-  { key: 'class_grade', group: 'work', label: 'Class / year · Clasa / anul', syn: ['clasa', 'class', 'grade', 'anul de studiu', 'an de studiu', 'year of study', 'grupa'] },
+  { key: 'school', group: 'work', label: 'School / university · Școala / Universitatea', syn: ['unitatea de invatamant', 'scoala', 'liceul', 'colegiul', 'universitatea', 'universitate', 'institutia de invatamant', 'school', 'university', 'college', 'institution'] },
+  { key: 'faculty', group: 'work', label: 'Faculty · Facultatea', syn: ['facultatea', 'facultatii', 'facultate', 'faculty', 'faculty of', 'school of', 'departamentul', 'department'] },
+  { key: 'study_program', group: 'work', label: 'Study programme · Programul de studii', syn: ['programul de studii', 'program de studii', 'programul de studiu', 'specializarea', 'specializare', 'specializarii', 'specialization', 'study programme', 'study program', 'programme', 'major', 'domeniul de studii', 'domeniul'] },
+  { key: 'class_grade', group: 'work', label: 'Class / year of study · Clasa / anul de studiu', syn: ['clasa', 'class', 'grade', 'anul de studiu', 'an de studiu', 'anul de studii', 'year of study', 'grupa', 'study year'] },
   { key: 'student_id', group: 'work', label: 'Student ID · Nr. matricol', syn: ['numar matricol', 'nr matricol', 'matricol', 'student id', 'student number'] },
 
   { key: 'iban', group: 'bank', label: 'IBAN', syn: ['iban', 'cont iban', 'cod iban', 'cont bancar', 'contul', 'bank account', 'account number', 'cont'] },
@@ -60,6 +62,9 @@ const FIELD_DEFS = [
 const SPECIAL_FIELDS = [
   { key: 'today', label: "Today's date", syn: ['data completarii', 'data semnarii', 'today', 'today s date'] },
   { key: 'birth_place_date', label: 'Place and date of birth', syn: ['locul si data nasterii', 'data si locul nasterii', 'locul si data de nastere', 'data si locul de nastere', 'place and date of birth', 'date and place of birth'] },
+  { key: 'academic_year', label: 'Academic year (e.g. 2026-2027)', syn: ['anul universitar', 'an universitar', 'anului universitar', 'anul scolar', 'an scolar', 'anului scolar', 'academic year', 'school year'] },
+  { key: 'academic_year_start', label: 'Academic year: first year', syn: [] },
+  { key: 'academic_year_end', label: 'Academic year: second year', syn: [] },
   { key: 'age', label: 'Age (from birth date)', syn: ['varsta', 'varsta ani', 'in varsta de', 'age', 'years old', 'ani impliniti'] },
   { key: 'birth_day', label: 'Birth day (dd)', syn: ['ziua nasterii'] },
   { key: 'birth_month', label: 'Birth month (mm)', syn: ['luna nasterii'] },
@@ -93,7 +98,7 @@ const AMBIG_CONTEXT = {
   ],
   '@zi': [['birth_day', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_day', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
   '@luna': [['birth_month', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_month', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
-  '@an': [['birth_year', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_year', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
+  '@an': [['class_grade', ['student', 'studenta', 'studentul', 'studentei', 'facultatii', 'facultatea', 'studii', 'specializarea', 'elev', 'eleva', 'elevul']], ['birth_year', ['nascut', 'nascuta', 'nastere', 'nasterii', 'born', 'birth']], ['today_year', ['data', 'date', 'azi', 'astazi', 'today', 'semnatura']]],
   '@in': [
     ['birth_place', ['nascut', 'nascuta', 'nastere']],
     ['address', ['domiciliat', 'domiciliata', 'domiciliul', 'locuiesc', 'locuieste', 'resedinta']],
@@ -107,11 +112,55 @@ function compileFields(vault) {
   const list = [...FIELD_DEFS, ...SPECIAL_FIELDS, ...AMBIGUOUS].map((f) => ({ key: f.key, synN: f.syn.map(norm) }));
   // wordings you taught it by correcting a blank
   for (const l of vault?.learned || []) list.push({ key: l.key, synN: [l.phrase] });
+  // your extra fields: their name and aliases, plus the same words in the other language
   for (const c of vault?.custom || []) {
     const syn = [c.label, ...(c.aliases || '').split(',')].map(norm).filter(Boolean);
-    list.push({ key: c.key, synN: syn });
+    for (const x of [...syn]) {
+      const t = translatePhrase(x);
+      if (!t) continue;
+      // "scholarship type" -> "bursa tip" and "tip bursa": Romanian often puts the words the other way round
+      for (const v of [t, t.split(' ').reverse().join(' ')]) if (!syn.includes(v)) syn.push(v);
+    }
+    list.push({ key: c.key, synN: syn, custom: true });
   }
+  for (const f of list) f.synS = f.synN.map(stemPhrase);
   return list;
+}
+
+// A light Romanian stemmer: "facultății" -> "facultat", "domiciliului" -> "domicili", "studenta" -> "student"
+const RO_SUFFIXES = ['urilor', 'ilor', 'elor', 'ului', 'iilor', 'atii', 'atea', 'ul', 'ua', 'lor', 'ii', 'ei', 'ea', 'ia', 'le', 'ie', 'a', 'e', 'i', 'u'];
+function stemWord(w) {
+  if (w.length < 5 || /\d/.test(w)) return w;
+  for (const suf of RO_SUFFIXES) if (w.endsWith(suf) && w.length - suf.length >= 4) return w.slice(0, -suf.length);
+  return w;
+}
+function stemPhrase(s) { return String(s).split(' ').filter(Boolean).map(stemWord).join(' '); }
+
+// Romanian <-> English words found on forms (to match your extra fields in either language)
+const RO_EN = {
+  nume: 'name', prenume: 'first name', numar: 'number', nr: 'no', data: 'date', adresa: 'address', telefon: 'phone', cod: 'code',
+  oras: 'city', localitate: 'city', judet: 'county', tara: 'country', scoala: 'school', liceu: 'high school', facultate: 'faculty', facultatea: 'faculty',
+  universitate: 'university', an: 'year', anul: 'year', clasa: 'class', grupa: 'group', specializare: 'specialization', program: 'programme',
+  studii: 'studies', profesor: 'teacher', coordonator: 'coordinator', indrumator: 'supervisor', echipa: 'team', club: 'club', firma: 'company',
+  societate: 'company', functie: 'position', functia: 'position', salariu: 'salary', venit: 'income', masina: 'car', auto: 'car',
+  inmatriculare: 'registration', permis: 'licence', conducere: 'driving', pasaport: 'passport', grupa_sanguina: 'blood type', sange: 'blood',
+  alergii: 'allergies', medic: 'doctor', asigurare: 'insurance', contract: 'contract', cont: 'account', banca: 'bank', sot: 'husband',
+  sotie: 'wife', parinte: 'parent', mama: 'mother', tata: 'father', frate: 'brother', sora: 'sister', varsta: 'age', inaltime: 'height',
+  greutate: 'weight', marime: 'size', olimpiada: 'olympiad', concurs: 'competition', premiu: 'prize', medie: 'average', media: 'average',
+  nota: 'grade', matricol: 'registration number', legitimatie: 'card', camera: 'room', camin: 'dormitory', bursa: 'scholarship',
+  limba: 'language', nationalitate: 'nationality', religie: 'religion', profesie: 'profession', ocupatie: 'occupation', angajator: 'employer',
+  site: 'website', utilizator: 'username', parola: 'password', semnatura: 'signature', serie: 'series', seria: 'series', titlu: 'title',
+  lucrare: 'paper', tema: 'topic', proiect: 'project', mentor: 'mentor', categorie: 'category', disciplina: 'subject', materie: 'subject',
+  rezultat: 'result', punctaj: 'score', loc: 'place', nivel: 'level', experienta: 'experience', competente: 'skills', hobby: 'hobby',
+  contact: 'contact', urgenta: 'emergency', persoana: 'person', tip: 'type', tipul: 'type', student: 'student', coordonatorul: 'coordinator',
+  marca: 'brand', model: 'model', culoare: 'colour', inregistrare: 'registration', echipament: 'equipment', masura: 'size', de: 'of', si: 'and', al: 'of', a: 'of',
+};
+const EN_RO = Object.fromEntries(Object.entries(RO_EN).filter(([k]) => !['de', 'si', 'al', 'a'].includes(k)).map(([r, e]) => [e, r.replace('_', ' ')]));
+function translatePhrase(p) {
+  const words = p.split(' ').filter(Boolean);
+  const one = (w) => RO_EN[w] || RO_EN[stemWord(w)] || EN_RO[w];
+  const out = words.map(one);
+  return out.every(Boolean) ? out.join(' ').replace(/_/g, ' ') : null;
 }
 
 function lastWordIndex(hay, word) { return hay.lastIndexOf(' ' + word + ' '); }
@@ -123,9 +172,14 @@ function classify(label, compiled, opts = {}) {
   if (!L.trim()) return null;
   const maxTail = opts.maxTail ?? 24;
   let best = null, second = null;
+  // pass 1: exact words; pass 2: Romanian word stems ("facultății" = "facultatea", "domiciliului" = "domiciliul")
+  let Lm = L;
+  for (const pass of ['synN', 'synS']) {
+  if (pass === 'synS') { if (best || opts.stem === false) break; Lm = ' ' + stemPhrase(L.trim()) + ' '; }
   for (const f of compiled) {
-    for (const s of f.synN) {
+    for (const s of f[pass] || []) {
       if (!s) continue;
+      const L = Lm;
       const idx = lastWordIndex(L, s);
       if (idx < 0) continue;
       const tail = L.length - (idx + s.length + 2);
@@ -137,8 +191,10 @@ function classify(label, compiled, opts = {}) {
       else if (f.key[0] !== '@' && (!second || score > second.score)) second = { key: f.key, syn: s, score, tail };
     }
   }
+  }
   classify.lastGuess = false;
   if (best) {
+    const L = Lm;
     const after = L.slice(L.lastIndexOf(' ' + best.syn + ' ') + best.syn.length + 1) + ' ';
     // "prenumele părinţilor", "Requester's name": asks about someone else
     const at = L.lastIndexOf(' ' + best.syn + ' ');
@@ -217,6 +273,10 @@ function computeValues(vault, personId) {
     if (age >= 0 && age < 130) v.age = String(age);
   }
   const t = new Date();
+  // the academic year starts in autumn: Nov 2026 -> 2026-2027, Mar 2027 -> 2026-2027
+  if (!v.academic_year) { const y0 = t.getMonth() >= 8 ? t.getFullYear() : t.getFullYear() - 1; v.academic_year = y0 + '-' + (y0 + 1); }
+  const ay = /(\d{4})\D+(\d{2,4})/.exec(v.academic_year);
+  if (ay) { v.academic_year_start = ay[1]; v.academic_year_end = ay[2].length === 2 ? ay[1].slice(0, 2) + ay[2] : ay[2]; }
   v.today_day = String(t.getDate()).padStart(2, '0'); v.today_month = String(t.getMonth() + 1).padStart(2, '0'); v.today_year = String(t.getFullYear());
   if (!v.address) {
     const parts = [];
@@ -292,4 +352,43 @@ function addressVariants(v) {
   out.push([street, city].filter(Boolean).join(', '));
   out.push([street, v.city].filter(Boolean).join(', '));
   return [...new Set(out.filter(Boolean))];
+}
+
+// Romanian or English document? (diacritics and common words)
+function detectLang(text) {
+  const t = ' ' + String(text).toLowerCase() + ' ';
+  const ro = (t.match(/[ăâîșțşţ]/g) || []).length + (t.match(/ (și|si|de|al|cu|pentru|în|subsemnatul|domiciliat|data|nume|prenume) /g) || []).length * 2;
+  const en = (t.match(/ (the|of|and|your|name|date|address|please|signature|number|birth|surname) /g) || []).length * 2;
+  return en > ro * 1.2 && en >= 4 ? 'en' : 'ro';
+}
+
+// Some values have to be in the document's language
+const VALUE_WORDS = {
+  citizenship: [['română', 'romana', 'roman', 'romanian'], ['moldovenească', 'moldoveneasca', 'moldovan'], ['maghiară', 'maghiara', 'hungarian'], ['germană', 'germana', 'german'], ['franceză', 'franceza', 'french'], ['italiană', 'italiana', 'italian'], ['spaniolă', 'spaniola', 'spanish'], ['britanică', 'britanica', 'british'], ['americană', 'americana', 'american']],
+  country: [['România', 'romania'], ['Republica Moldova', 'moldova'], ['Ungaria', 'hungary'], ['Germania', 'germany'], ['Franța', 'franta', 'france'], ['Italia', 'italy'], ['Spania', 'spain'], ['Marea Britanie', 'regatul unit', 'united kingdom', 'uk'], ['Statele Unite', 'sua', 'usa', 'united states']],
+  gender: [['M', 'masculin', 'm', 'male', 'barbat'], ['F', 'feminin', 'f', 'female', 'femeie']],
+};
+const VALUE_EN = { citizenship: ['Romanian', 'Moldovan', 'Hungarian', 'German', 'French', 'Italian', 'Spanish', 'British', 'American'],
+  country: ['Romania', 'Moldova', 'Hungary', 'Germany', 'France', 'Italy', 'Spain', 'United Kingdom', 'United States'], gender: ['Male', 'Female'] };
+const VALUE_RO = { citizenship: ['română', 'moldovenească', 'maghiară', 'germană', 'franceză', 'italiană', 'spaniolă', 'britanică', 'americană'],
+  country: ['România', 'Republica Moldova', 'Ungaria', 'Germania', 'Franța', 'Italia', 'Spania', 'Marea Britanie', 'Statele Unite'], gender: ['Masculin', 'Feminin'] };
+function translateValue(key, v, lang) {
+  const groups = VALUE_WORDS[key];
+  if (!groups || !lang || !v) return v;
+  const n = norm(v);
+  const i = groups.findIndex((g) => g.some((w) => norm(w) === n));
+  if (i < 0) return v;
+  if (key === 'gender' && v.length <= 1) return lang === 'en' ? ['M', 'F'][i] : v; // single letters stay as they are
+  return (lang === 'en' ? VALUE_EN : VALUE_RO)[key][i];
+}
+
+function dropRepeatedWord(label, v) {
+  const lw = norm(cleanLabel(String(label).split(/_{3,}|\.{4,}|\u2026|\t/).pop())).split(' ').filter(Boolean);
+  while (lw.length && ['de', 'din', 'al', 'a', 'la', 'of', 'at'].includes(lw[lw.length - 1])) lw.pop();
+  const last = lw[lw.length - 1];
+  const parts = String(v).split(/\s+/);
+  if (!last || parts.length < 2 || stemWord(norm(parts[0])) !== stemWord(last)) return v;
+  parts.shift();
+  if (['de', 'din', 'of'].includes(norm(parts[0])) && parts.length > 1) parts.shift();
+  return parts.join(' ');
 }

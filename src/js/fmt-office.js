@@ -120,11 +120,16 @@ function wSplitRun(t, offset) {
 }
 
 let docPrId = 7300;
-function wDrawingRun(doc, rid, img) {
+// floating: placed right where the blank is, over the text, without pushing anything to a new line
+function wDrawingRun(doc, rid, img, floating) {
   const cy = 468000; // 1.3 cm
   const cx = Math.round(cy * img.w / img.h);
   const id = ++docPrId;
-  const xml = `<w:r xmlns:w="${NS.w}"><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${id}" name="Signature ${id}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${NS.a}" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="${NS.a}"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${id}" name="signature.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
+  const wp = 'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
+  const open = floating
+    ? `<wp:anchor ${wp} distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251659264" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="character"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="line"><wp:posOffset>${-Math.round(cy * 0.6)}</wp:posOffset></wp:positionV><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/>`
+    : `<wp:inline ${wp} distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>`;
+  const xml = `<w:r xmlns:w="${NS.w}"><w:drawing>${open}<wp:docPr id="${id}" name="Signature ${id}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="${NS.a}" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="${NS.a}"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${id}" name="signature.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>${floating ? '</wp:anchor>' : '</wp:inline>'}</w:drawing></w:r>`;
   return doc.importNode(parseXml(xml).documentElement, true);
 }
 
@@ -245,7 +250,8 @@ async function processDocx(bytes, env) {
     const where = part.name === 'word/document.xml' ? '' : part.name.replace(/^word\/|\.xml$/g, '');
     const imageAt = (p, pos, img) => {
       usedImage = true;
-      const run = wDrawingRun(doc, relFor(part), img);
+      // in running text the signature floats at the blank; in table cells and controls it sits inline
+      const run = wDrawingRun(doc, relFor(part), img, !!(pos && pos.seg && pos.seg.t));
       const at = pos && pos.seg && pos.seg.t ? wSplitRun(pos.seg.t, pos.offset) : null;
       if (at) at.parent.insertBefore(run, at.before);
       else p.appendChild(run);

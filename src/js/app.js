@@ -417,6 +417,7 @@ const App = {
       throw new Error(`Can't fill .${ext || '?'} files yet. Supported: PDF, Word (.docx/.doc), Pages, OpenDocument, Excel, PowerPoint, pictures, HTML and text.`);
     }
     refineKeys(sess.blanks);
+    sess.lang = detectLang(sess.blanks.map((b) => (b.window || b.before || '') + ' ' + (b.after || '')).join(' '));
     // sections about your child/spouse/parent: use that person's info if you saved it
     for (const b of sess.blanks) {
       if (!b.otherPerson || !b.otherKey) continue;
@@ -490,6 +491,15 @@ const App = {
 
   // What goes into a blank: {text} or {image}
   valueOf(b) {
+    // what you typed in the list wins over everything
+    if (b.override != null) {
+      if (!b.override.trim()) return null;
+      return b.kind === 'field' && b.fieldType !== 'text' && b.fieldType !== 'sig' ? fieldValue(b, b.override) : { text: b.override };
+    }
+    return this.autoValue(b);
+  },
+
+  autoValue(b) {
     if (!b.key) return null;
     if (b.key === '__tick') return { check: true, text: '✓' };
     if (b.key === '__text') return b.text ? (b.kind === 'field' ? fieldValue(b, b.text) : { text: b.text }) : null;
@@ -504,6 +514,10 @@ const App = {
       v = v.replace(/^(str(ada)?|bd|b-dul|bulevardul|sos(eaua)?|calea|aleea)\.?\s+/i, '');
     }
     if (!v) return null;
+    // "Banca ____" + "Banca Transilvania", "Facultății de ____" + "Facultatea de Matematică": don't repeat the word
+    v = dropRepeatedWord(b.labelText ?? b.before ?? '', v);
+    // English forms get English words for nationality, country and sex
+    v = translateValue(b.key, v, this.sess?.lang);
     // dates follow the format the form asks for, otherwise the one in Settings
     if (/^(birth_date|today|id_issue_date|id_expiry_date)$/.test(b.key)) {
       const d = parseDate(v);
@@ -540,12 +554,40 @@ const App = {
     s.onchange = () => {
       let text;
       if (s.value === '__text') {
-        text = prompt('Text to put here:', b.text || '');
+        // type it straight into the box next to it (in the list or the page toolbar)
+        const box = s.parentElement && s.parentElement.querySelector('.val-edit');
+        if (box) { s.value = b.key || ''; box.focus(); return; }
+        text = prompt('Text to put here:', b.override ?? b.text ?? '');
         if (text == null) { s.value = b.key || ''; return; }
       }
       onchange(s.value || null, text);
     };
     return s;
+  },
+
+  // A text box showing exactly what will be written; typing changes it, ↺ goes back to automatic
+  valueEditor(b, onChange) {
+    const auto = this.autoValue(b);
+    const shown = b.override != null ? b.override : auto && auto.text != null && !auto.image ? auto.text : '';
+    const inp = h('input', { class: 'val-edit' + (b.override != null ? ' edited' : ''), value: shown, placeholder: b.key ? 'empty: type to fill in' : 'type what goes here', spellcheck: false });
+    const reset = h('button', { class: 'mini reset', title: 'Back to the automatic value', hidden: b.override == null }, '↺');
+    inp.addEventListener('input', () => {
+      b.override = inp.value;
+      inp.classList.add('edited'); reset.hidden = false;
+      if (this.editor) { this.editor.draw(b); }
+      onChange && onChange();
+    });
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+    reset.addEventListener('click', (e) => {
+      e.stopPropagation();
+      b.override = null;
+      const a = this.autoValue(b);
+      inp.value = a && a.text != null && !a.image ? a.text : '';
+      inp.classList.remove('edited'); reset.hidden = true;
+      if (this.editor) this.editor.draw(b);
+      onChange && onChange();
+    });
+    return h('span', { class: 'val-wrap' }, inp, reset);
   },
 
   personSelect(b) {
@@ -594,6 +636,18 @@ const App = {
     this.renderList();
   },
 
+  // after typing: update the row colour and the counts without rebuilding the list (keeps the cursor)
+  refreshRow(b) {
+    const r = $(`#blank-list .row[data-id="${b.id}"]`);
+    if (r) { const v = this.valueOf(b); r.classList.toggle('ok', !!v); r.classList.toggle('unknown', !v && !b.key); r.classList.toggle('missing', !v && !!b.key); }
+  },
+
+  // the page toolbar and the list show the same value
+  syncRowValue(b) {
+    const box = $(`#blank-list .row[data-id="${b.id}"] .val-edit`);
+    if (box && document.activeElement !== box) { box.value = b.override ?? ''; box.classList.toggle('edited', b.override != null); }
+  },
+
   highlightRow(b) {
     $$('#blank-list .row.sel').forEach((r) => r.classList.remove('sel'));
     const r = $(`#blank-list .row[data-id="${b.id}"]`);
@@ -615,7 +669,9 @@ const App = {
       const unticked = !val && b.fieldType === 'check' && b.key && this.values[b.key];
       const status = val || unticked || noPicture ? 'ok' : b.key ? 'missing' : 'unknown';
       const tooLong = val?.text && b.kind === 'text' && b.maxW > 10 && textWidth(val.text, b.size * 0.72) > b.maxW * 1.05;
-      const preview = val ? (val.image ? h('img', { src: val.image.dataUrl, class: 'sigthumb' }) : h('span', { text: val.text }))
+      const editable = !(b.key === 'signature' || b.fieldType === 'check' || b.fieldType === 'radio' || b.fieldType === 'choice' || b.kind === 'image');
+      const preview = editable ? this.valueEditor(b, () => { this.refreshRow(b); const tb = $('.toolbar .val-edit'); if (tb && this.editor?.sel === b && document.activeElement !== tb) tb.value = b.override ?? ''; })
+        : val ? (val.image ? h('img', { src: val.image.dataUrl, class: 'sigthumb' }) : h('span', { text: val.text }))
         : h('span', { class: 'muted', text: noPicture ? '✍︎ sign by hand (this file type can\'t hold a picture)' : unticked ? '☐ stays unticked' : b.key ? (b.key === 'signature' ? 'no signature saved' : 'empty in your info') : 'not filled' });
       const row = h('div', { class: 'row ' + status + (b.guess && val ? ' guess' : ''), 'data-id': b.id },
         h('div', { class: 'ctx' },

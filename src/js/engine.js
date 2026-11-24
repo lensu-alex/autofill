@@ -179,6 +179,13 @@ function contextSnippet(b) {
 // in the first blank, because the street comes separately.
 function refineKeys(blanks) {
   applySections(blanks);
+  // "anul universitar ......-......": the two halves of the academic year
+  blanks.forEach((b, i) => {
+    const n = blanks[i + 1];
+    if (b.key === 'academic_year' && n && (!n.key || n.key === 'academic_year') && /^\s*[-–\/]\s*$/.test(n.labelText || '')) {
+      b.key = 'academic_year_start'; n.key = 'academic_year_end'; b.guess = n.guess = false;
+    }
+  });
   // "seria ____ nr. ____": a nameless blank right after the ID series is the ID number
   blanks.forEach((b, i) => {
     if (!b.key && i > 0 && blanks[i - 1].key === 'id_series' && b.kind !== 'field' && !b.otherPerson) { b.key = 'id_number'; b.guess = true; }

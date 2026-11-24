@@ -114,3 +114,14 @@ button.danger { color: var(--bad); }
 .people { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .people button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .psel { margin-top: 6px; font-size: 12px; padding: 3px 6px; }
+
+.val-wrap { display: flex; gap: 4px; align-items: center; width: 100%; }
+.val-edit { flex: 1; min-width: 0; padding: 5px 8px; font-size: 14px; border: 1px dashed var(--line); background: #fbfcff; }
+.val-edit:hover { border-color: #b9c2d6; }
+.val-edit.edited { border-style: solid; border-color: var(--accent); background: #fff; font-weight: 500; }
+.val-edit::placeholder { color: #a7aec0; font-style: italic; }
+.mini.reset { padding: 2px 7px; }
+.val { white-space: normal; }
+
+.toolbar .val-wrap { width: 190px; }
+.toolbar .val-edit { font-size: 12px; padding: 4px 6px; }

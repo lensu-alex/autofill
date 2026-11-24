@@ -353,8 +353,10 @@ async function processPdf(bytes, env, meta = {}) {
   // printed labels lose their explanations: "5 Address (number, street…). See instructions." -> "5 Address"
   const cls = (t, fuzzy = true) => {
     if (!t) return null;
+    // a field *name* (fuzzy=false) that reads like a sentence is an instruction, not a label
+    if (!fuzzy && t.trim().split(/\s+/).length > 5) return null;
     const core = t.replace(/\([^)]*\)?/g, ' ').split(/\.\s/)[0];
-    return classify(core, env.compiled, { ...opts, maxTail: 20, fuzzy, window: t });
+    return classify(core, env.compiled, { ...opts, maxTail: 20, fuzzy, stem: fuzzy, window: t });
   };
   const isGeneric = (n) => /^(text|field|fill|group|choice|check ?box|button|untitled|camp|undefined)?\s*\d*$/i.test(n.trim());
   for (const f of fields) {
@@ -813,12 +815,13 @@ class PdfEditor {
     if (scroll) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     const tb = h('div', { class: 'toolbar' },
       this.app.fieldSelect(b, (k, text) => this.app.setKey(b, k, text)),
+      b.kind !== 'image' && !['check', 'radio', 'choice', 'sig'].includes(b.fieldType) ? this.app.valueEditor(b, () => { this.app.refreshRow(b); this.app.syncRowValue(b); }) : null,
       b.kind === 'text' ? h('button', { class: 'mini', title: 'Smaller', onclick: () => { b.size = Math.max(5, b.size - 1); this.draw(b); this.select(b); } }, 'A−') : null,
       b.kind === 'text' ? h('button', { class: 'mini', title: 'Bigger', onclick: () => { b.size = Math.min(40, b.size + 1); this.draw(b); this.select(b); } }, 'A+') : null,
       b.kind !== 'field' ? h('button', { class: 'mini danger', title: 'Remove', onclick: () => this.app.removeBlank(b) }, '✕') : null,
     );
     const P = this.sess.pages[b.page];
-    tb.style.left = Math.max(0, Math.min(parseFloat(el.style.left), P.vp.width - 300)) + 'px';
+    tb.style.left = Math.max(0, Math.min(parseFloat(el.style.left), P.vp.width - 470)) + 'px';
     tb.style.top = Math.max(0, parseFloat(el.style.top) - 40) + 'px';
     tb.addEventListener('pointerdown', (e) => e.stopPropagation());
     P.layer.append(tb);
