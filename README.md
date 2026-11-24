@@ -17,8 +17,8 @@ Fills any document with your personal information and signature, from an encrypt
 
 | File | How |
 |---|---|
-| PDF with fillable fields | text boxes, tick boxes (☐ M ☐ F), option buttons, dropdowns, CNP in 13 one-letter boxes, dates in 3 boxes; Adobe XFA leftovers removed |
-| PDF without fields | `____`, `……`, `Nume:` + gap, blanks drawn as lines, `|__|__|` character boxes, drawn tables (label cell → empty cell) |
+| PDF with fillable fields | text boxes, tick boxes (☐ M ☐ F), option buttons, dropdowns (age ranges too), CNP in 13 one-letter boxes, dates in 3 boxes (DD/MM/YYYY); Adobe XFA leftovers removed |
+| PDF without fields | `____`, `……`, `Nume:` + gap, blanks drawn as lines, `|__|__|` character boxes, rows of one-letter boxes (UK/EU style, long answers carry on to the next row, dates as dd mm yyyy groups), drawn tick boxes (an X next to "Male"), drawn tables (label cell → empty cell) |
 | Scans and photos (jpg, png, heic, tiff, webp, avif…) | read offline with OCR (Romanian + English); dotted and solid lines found in the picture; multi-page TIFF |
 | Word `.docx` and old `.doc` | blanks, `{{placeholders}}`, tables, content controls, old form fields, signature as a picture (`.doc` is converted, layout simplified) |
 | OpenDocument `.odt` `.ods` `.odp` | same as Word; spreadsheet cells |
