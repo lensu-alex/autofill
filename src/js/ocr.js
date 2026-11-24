@@ -315,5 +315,6 @@ async function ocrPage(pg, progress) {
   const sizes = items.map((i) => i.size).sort((a, b) => a - b);
   const med = sizes[sizes.length >> 1];
   if (med) for (const it of items) if (it.size < med * 1.3) it.size = med;
+  for (const it of items) it.size *= 0.92; // our font runs a little larger than typical printed ones
   return { items, rules, vrules };
 }

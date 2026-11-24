@@ -277,3 +277,19 @@ function learnPhrase(label) {
 }
 
 const RELATIONS = [['child', 'Child · Copil'], ['spouse', 'Spouse · Soț/soție'], ['parent', 'Parent · Părinte'], ['other', 'Other person']];
+
+// Shorter ways to write an address, longest first, for blanks with little room
+function addressVariants(v) {
+  const out = [v.address];
+  const street = [v.street && (/^(str|bd|b-dul|sos|calea|aleea|splaiul)\b/i.test(v.street) ? v.street : 'Str. ' + v.street),
+    v.street_number && 'nr. ' + v.street_number].filter(Boolean).join(' ');
+  const flat = [v.building && 'bl. ' + v.building, v.entrance && 'sc. ' + v.entrance, v.floor && 'et. ' + v.floor, v.apartment && 'ap. ' + v.apartment].filter(Boolean).join(', ');
+  const cityLong = v.city && v.sector ? v.city + ', Sector ' + v.sector : v.city;
+  const city = v.city && v.sector ? v.city + ', S' + v.sector : v.city;
+  out.push([street, flat, cityLong].filter(Boolean).join(', '));
+  out.push([street, cityLong].filter(Boolean).join(', '));
+  out.push([street, flat, city].filter(Boolean).join(', '));
+  out.push([street, city].filter(Boolean).join(', '));
+  out.push([street, v.city].filter(Boolean).join(', '));
+  return [...new Set(out.filter(Boolean))];
+}

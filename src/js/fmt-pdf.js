@@ -595,7 +595,7 @@ function fitSize(b, text) {
   let size = b.size;
   if (b.maxW && b.maxW > 10) {
     const w = textWidth(text, size);
-    if (w > b.maxW) size = Math.max(size * 0.72, size * b.maxW / w);
+    if (w > b.maxW) size = Math.max(size * 0.62, size * b.maxW / w);
   }
   return size;
 }

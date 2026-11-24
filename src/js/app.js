@@ -510,6 +510,11 @@ const App = {
       const fmt = dateHint((b.labelText ?? b.before ?? '') + ' ' + (b.after || '').slice(0, 20)) || this.settings().dateFormat;
       if (d && fmt) v = formatDate(new Date(d.y, d.m - 1, d.d), fmt);
     }
+    // a long address in a short printed blank: use the longest shorter form that fits
+    if (b.key === 'address' && b.kind === 'text' && b.maxW > 10 && !(this.vault.values.address || '').trim()) {
+      const vars = addressVariants(this.valuesFor(b.person));
+      v = vars.find((x) => textWidth(x, b.size * 0.9) <= b.maxW) || vars[vars.length - 1] || v;
+    }
     // "(cu majuscule)", "in capital letters"
     if (/majuscul|litere mari|litere de tipar|capital letters|block letters|in capitals/i.test((b.before || '') + ' ' + (b.labelText || '') + ' ' + (b.after || ''))) v = v.toLocaleUpperCase('ro');
     if (b.kind === 'field' && (b.fieldType !== 'text' || b.charIndex != null || b.datePart) && b.fieldType !== 'sig') return fieldValue(b, v);
